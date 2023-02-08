@@ -8,7 +8,6 @@ rc('font', family=font_name)
 import seaborn as sns
 
 import scipy as sp
-import statsmodels.api as sm
 
 from IPython.core.display import display, HTML
 
@@ -26,8 +25,18 @@ from functools import reduce
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder, OrdinalEncoder
 
+# # DecimalPoint : 어떤 값에 대하여 자동으로 소수점 자리수를 부여
+# def fun_Decimalpoint(value):
+#     if value == 0:
+#         return 3
+#     try:
+#         point_log10 = np.floor(np.log10(abs(value)))
+#         point = int((point_log10 - 3)* -1) if point_log10 >= 0 else int((point_log10 - 2)* -1)
+#     except:
+#         point = 0
+#     return point
 
-from DS_Plot import distbox
+
 
 # absolute_path = 'D:/Python/★★Python_POSTECH_AI/Dataset_AI/DataMining/'
 # df = pd.read_csv(absolute_path + 'dataset_city.csv')
@@ -114,12 +123,10 @@ def lsl_usl_split(criteria_data):
 
 
 
-
 # 특정 값이나 vector에 자동으로 소수점 부여
 # function auto_formating
 def auto_formating(x, criteria='max', return_type=None, decimal=None, decimal_revision=0, thousand_format=True):
     special_case=False
-
     if type(x) == str:
         return x
     
@@ -130,7 +137,8 @@ def auto_formating(x, criteria='max', return_type=None, decimal=None, decimal_re
         x_array = np.array([x])
     else:
         x_array = np.array(x)
-    x_Series_dropna = pd.Series(x_array[np.isnan(x_array) == False])
+    
+    x_Series_dropna = pd.Series(x_array[np.isnan(x_array) == False])        
 
     # 소수점 자릿수 Auto Setting
     if decimal is None:
@@ -194,6 +202,7 @@ def auto_formating(x, criteria='max', return_type=None, decimal=None, decimal_re
     elif 'array' in x_type_str:
         return np.array(result_Series)
     elif 'Series' in x_type_str:
+        result_Series.index = x.index
         return result_Series
 
 
@@ -375,100 +384,6 @@ def update_data(old_data, new_data, key, sort_values=None, ascending=False, verb
 
 
 # 【 Operation function 】 ################################################################################
-# def ttest_each
-# 여러개의 Group별로 평균, 편차, ttest 결과를 Return 하는 함수
-# import scipy as sp
-# from collections import namedtuple
-from itertools import combinations
-def ttest_each(data, x, group, equal_var=False, decimal_point=4, return_result='all', return_type='vector'):
-    """
-    < input >
-     . data (DataFrame): DataFrame
-     . x (str): column name
-     . group (str, list): grouping columns
-     . equal_var (bool): whether variance is equal between group when processing ttest
-     . decimal_point (int, None): pvalue decimal 
-     . return_result (str): 'all', 'count', 'mean', 'std', 'ttest', 'plot'
-     . return_type (str): 'matrix', 'vector'
-
-    < output >
-     . table by group (table)
-    """
-    result = namedtuple('ttest_each', ['count', 'mean', 'std', 'ttest'])
-
-    if type(group) == list and len(group) > 1:
-        group_unique = data[group].sort_values(by=group).drop_duplicates()
-        # group_index_names = group_unique.apply(lambda x: ', '.join([f"{idx}: {v}" for idx, v in zip(x.index, x)]),axis=1).tolist()
-        group_index = pd.MultiIndex.from_frame(group_unique)
-        groups = group.copy()
-    else:
-        if type(group) == list:
-            group_unique = data[group[0]].drop_duplicates()
-            groups = group.copy()
-        elif type(group) == str:
-            group_unique = data[group].drop_duplicates()
-            groups = [group].copy()
-        # group_index_names = group_unique.copy()
-        group_index = group_unique.to_list().copy()
-    # print(group_index)
-    # print(groups)
-
-    group_table = pd.DataFrame(np.zeros(shape=(len(group_index), len(group_index))), index=group_index, columns=group_index)
-    group_table[group_table== 0] = np.nan
-    
-    table_count = group_table.copy()
-    table_mean = group_table.copy()
-    table_std = group_table.copy()
-    table_ttest = group_table.copy()
-    table_plot = group_table.copy()
-
-    groups_dict = {}
-    for gi, gv in data.groupby(groups):
-        groups_dict[gi] = np.array(gv[x])
-
-    vector_table_list = []
-    for g in combinations(group_index, 2):
-        data_group = [groups_dict[g[1]], groups_dict[g[0]]]
-        data_group_count = [int(len(x)) for x in data_group]
-        data_group_mean = [auto_formating(np.mean(x)) for x in data_group]
-        data_group_std = [auto_formating(np.std(x)) for x in data_group]
-
-        group_count = f" {data_group_count[1]} - {data_group_count[0]}"
-        group_mean = f" {data_group_mean[1]} - {data_group_mean[0]}"
-        group_std = f" {data_group_std[1]} - {data_group_std[0]}"
-        group_ttest = sp.stats.ttest_ind(data_group[1], data_group[0], equal_var=equal_var).pvalue
-        if decimal_point is not None:
-            group_ttest = round(group_ttest, decimal_point)
-            
-        table_count.loc[g[0], g[1]] = group_count
-        table_mean.loc[g[0], g[1]] = group_mean
-        table_std.loc[g[0], g[1]] = group_std
-        table_ttest.loc[g[0], g[1]] = group_ttest
-        
-        # if return_result == 'plot':
-        data_group1 = pd.Series(data_group[1], name=x).to_frame()
-        data_group1[group] = g[1]
-        data_group2 = pd.Series(data_group[0], name=x).to_frame()
-        data_group2[group] = g[0]
-        data_concat = pd.concat([data_group1, data_group2], axis=0)
-        group_plot = distbox(data=data_concat, on=x, group=group)
-        table_plot.loc[g[0], g[1]] = group_plot
-        
-        vector_table_list.append([g[0], g[1], group_count, group_mean, group_std, group_ttest, group_plot])
-    vector_table = pd.DataFrame(vector_table_list, columns=['group1', 'group2', 'count','mean', 'std', 'ttest', 'plot']).set_index(['group1', 'group2'])
-    
-    if return_result == 'all':
-        return result(table_count, table_mean, table_std, table_ttest) if return_type == 'matrix' else vector_table
-    elif return_result == 'count':
-        return table_count if return_type == 'matrix' else vector_table['count']
-    elif return_result == 'mean':
-        return table_mean if return_type == 'matrix' else vector_table['mean']
-    elif return_result == 'std':
-        return table_std if return_type == 'matrix' else vector_table['std']
-    elif return_result == 'ttest':  
-        return table_ttest if return_type == 'matrix' else vector_table['ttest']
-    elif return_result == 'plot':  
-        return table_plot if return_type == 'matrix' else vector_table['plot']
 
 
 
@@ -507,10 +422,12 @@ class Quantile():
     def __str__(self):
         self.__repr__()
 
+
+
 # Describe Numeric Series Data
 # class Describe()
 class Describe():
-    def __init__(self, x=False, mode='dict'):
+    def __init__(self, x=False, mode='series'):
         self.x = False if type(x) == bool and x == False else x
         self.mode = mode
    
@@ -529,7 +446,7 @@ class Describe():
         lf_sigma = df_describe['mean'] - sigma * df_describe['std']
 
         self.sigmaOutlier = pd.Series({'lf_sigma': lf_sigma, 'uf_sigma': uf_sigma})
-        self.sigmaDescribe = pd.concat([df_describe, self.sigmaOutlier])
+        self.sigmaDescribe = pd.concat([df_describe, self.sigmaOutlier], axis=0)
 
         self.df_describe = df_describe
         self.uf_sigma = uf_sigma
@@ -584,6 +501,7 @@ class Describe():
             return self.all
         if self.mode.lower() == 'dict':
             return self.all.to_dict()
+        return self.sigmaDescribe
    
     def __call__(self, x):
         if type(x)==bool and x==False:
@@ -591,6 +509,7 @@ class Describe():
         else:
             self.x = x
         return self.describe(x=x)
+
 
 
 
@@ -959,7 +878,6 @@ class Outlier():
 def cpk(mean, std, lsl=None, usl=None, lean=False):
     if np.isnan(std) or std == 0:
         return np.nan
-    
     if (lsl is None or np.isnan(lsl))and (usl is None or np.isnan(usl)):
         return np.nan
     lsl = -np.inf if (lsl is None or np.isnan(lsl)) else lsl
@@ -993,7 +911,7 @@ def cpk_line(x, bins=50, density=False):
 # 【 Series, Vector function 】 ################################################################################
 # 일정 범위구간에 따라 Level을 나눠주는 함수
 # function cut_range
-def cut_range(x, categories, right=False, labels=None, include_lowest=True, remove_unused_categories=True):
+def cut_range(x, categories, right=False, labels=None, include_lowest=True, remove_unused_categories=True, ordered=True):
     if labels is not None and len(categories)+1 != len(labels):
         raise("labels must be the same length as categories")
     if (right==False and include_lowest==False) or (right==True and include_lowest==True):
@@ -1032,7 +950,12 @@ def cut_range(x, categories, right=False, labels=None, include_lowest=True, remo
         categories = labels
 
     if "<class 'pandas.core.series.Series'>" in str(type(vector)):
-        vector = pd.Series(pd.Categorical(vector, categories=categories, ordered=True))
+        if ordered is True:
+            vector = pd.Series(pd.Categorical(vector, categories=categories, ordered=True))
+        elif ordered == 'descending':
+            vector = pd.Series(pd.Categorical(vector, categories=categories[::-1], ordered=True))
+        else:
+            vector = pd.Series(pd.Categorical(vector, categories=categories))
         vector.index = x.index
         if remove_unused_categories:
             vector = vector.cat.remove_unused_categories()
@@ -1350,12 +1273,28 @@ class Capability():
 
 # class CapabilityGroup
 class CapabilityGroup():
+    """
+    【 Required Class 】 Capability
+     
+     . capability : ['cpk', 'observe_reject_prob', 'gaussian_reject_prob', 'cpk_plot']
+     . statistics : ['count','mean','std']
+    """
     def __init__(self, capability=['cpk', 'observe_reject_prob', 'gaussian_reject_prob', 'cpk_plot']
                 , statistics=['count','mean','std']):
         self.capability = capability
         self.statistics = statistics
 
     def analysis(self, data, criteria, target=None, value_vars=None, capability=None, statistics=None, lean=False, hist_kwargs={}, line_kwargs={}):
+        """
+          . data : DataFrame
+          . criteria : Criteria table (index: group, value: range of capability)
+          . capability : ['cpk', 'observe_reject_prob', 'gaussian_reject_prob', 'cpk_plot']
+          . statistics : ['count','mean','std']
+          . lean : if True, sign mean direction of Cpk
+          . hist_kwargs(dict) : histogram arguments
+          . line_kwargs(dict) : cpk_line arguments
+        """
+        
         if capability is None:
             capability = self.capability
         if statistics is None:
@@ -1480,6 +1419,7 @@ class CapabilityGroup():
         self.capability_table = capability_table
         self.capability_dict = capability_dict
         self.capability_data = capability_data
+        self.result = capability_table
         self.reset_dictgen()
 
     def reset_dictgen(self, key='all'):
@@ -1502,19 +1442,22 @@ class CapabilityGroup():
 # Capability Dataset from such groups
 class CapabilityData():
     """
-
-    criteria : {'YP': ['600~750'], 'TS':['980~'], 'EL':['12~']}
-    criteria_column : {'YP':'YP_보증범위', 'TS':'TS_보증범위', 'EL':'EL_보증범위'}
+    【 Required Class 】 Capability, CapabilityGroup
+     
+     . capability : ['cpk', 'observe_reject_prob', 'gaussian_reject_prob', 'cpk_plot']
+     . statistics : ['count','mean','std']
     """
-    def __init__(self, capability=['cpk', 'observe_reject_prob', 'gaussian_reject_prob', 'cpk_plot']
-            , statistics=['count','mean','std']):
+    def __init__(self, capability=['cpk', 'observe_reject_prob', 'gaussian_reject_prob', 'cpk_plot'],
+            statistics=['count','mean','std']):
         self.capability = capability
         self.statistics = statistics
     
-    def analysis(self, data, group=None, criteria=None, criteria_column=None):
+    def analysis(self, data, group=None, criteria=None, criteria_column=None, **kwargs):
         """
-        criteria : {'YP': ['600~750'], 'TS':['980~'], 'EL':['12~']}
-        criteria_column : {'YP':'YP_보증범위', 'TS':'TS_보증범위', 'EL':'EL_보증범위'}
+          . group : 'group' or ['group1', 'group2']
+          . criteria : {'YP': ['600~750'], 'TS':['980~'], 'EL':['12~']}
+          . criteria_column : {'YP':'YP_보증범위', 'TS':'TS_보증범위', 'EL':'EL_보증범위'}
+          . **kwargs : 'CapabilityGroup' class 'analysis' method initialize arguments
         """
         data_copy = data.copy()
         data_copy['dummy'] = 'dummy'
@@ -1548,7 +1491,7 @@ class CapabilityData():
                 cy_frame = cy_frame.set_index('dummy')
                 cy_frame = cy_frame.applymap(lambda x: x.replace(' ~ ','~'))
                 
-                cg.analysis(gv, criteria=cy_frame)
+                cg.analysis(gv, criteria=cy_frame, **kwargs)
                 capa_result = cg.capability_table.drop('dummy', axis=1)
                 if group != 'dummy':
                     if type(group) == str:
@@ -2123,10 +2066,10 @@ class DF_Summary:
         else:
             columns = on
 
-        fig = plot_instance.summary_plot(data=self.data, on=columns,
-                dtypes=dtypes, max_object=max_object, return_plot=return_plot)
+        self.plot = plot_instance.summary_plot(data=self.data, on=columns,
+                dtypes=dtypes, max_object=max_object, return_plot=True)
         if return_plot:
-            return fig
+            return self.plot
 
 
 
@@ -2981,118 +2924,4 @@ class ScalerEncoder:
 ################################################################################################
 ################################################################################################
 ################################################################################################
-
-
-# Trend Analysis Class
-class TrendAnalysis():
-    """
-    【 Required Library 】
-    import statsmodels.api as sm  (sm.tsa.filters.hpfilter)
-    
-    """
-    def __init__(self, x=None, filter='hp_filter', rolling=2, **kwargs):
-        self.x = x
-        self.rolling = rolling
-        
-        self.cycle = None
-        self.trend = None
-        self.trend_slope_ = None
-        self.trend_info_ = None
-        
-        self.params = {}
-        self.params.update(kwargs)
-        self.filter_result = None
-        
-        self.filter = filter
-        
-        if x is not None:
-            if filter == 'hp_filter':
-                self.filter_result = self.analysis(x=self.x, filter=self.filter, **self.params)
-    
-    # 【 filters 】
-    def analysis(self, x=None, filter=None, **kwargs):
-        self.params.update(kwargs)
-
-        x = self.x if x is None else x
-        filter = self.filter if filter is None else filter
-        
-        if filter == 'hp_filter':
-            lamb = self.params['lamb'] if 'lamb' in self.params.keys() else 1600
-            self.cycle, self.trend = self.hp_filter(x, lamb)
-            self.filter_result = (self.cycle, self.trend)
-        return self.filter_result
-    
-    def hp_filter(self, x=None, lamb=None, save_params=False):
-        x = self.x if x is None else x
-        lamb = (self.params['lamb'] if 'lamb' in self.params.keys() else 1600) if lamb is None else lamb
-        
-        if save_params:
-            self.x = x
-            self.params['lamb'] = lamb
-        
-        if x is not None:
-            return sm.tsa.filters.hpfilter(x, lamb)
-
-    # 【 trend_slope 】
-    def calc_trend_slope(self, trend):
-        return trend.tail(1).mean() - trend.head(1).mean()   
-                    
-    def trend_slope(self, x=None, trend=None, filter=None, rolling=None, **kwargs):
-        self.params.update(kwargs)
-        input_x = self.x if x is None else x
-        input_trend = self.trend if trend is None else trend
-        input_filter = self.filter if filter is None else filter
-        input_rolling = self.rolling if rolling is None else rolling
-        
-        if input_x is None:
-            if input_trend is None:
-                raise('x, or trend is nessasary for working.')
-        else:
-            if input_trend is None:
-                self.analysis(x=input_x, filter=input_filter, **self.params)
-                input_trend = self.trend
-
-        self.trend_slope_ = input_trend.rolling(input_rolling).agg(self.calc_trend_slope)
-        return self.trend_slope_
-
-    # 【 trend_info 】
-    def calc_trend_info(self, trend_slope):
-        trend_slope_shift = trend_slope.iloc[1:]
-        info_list = []
-        now_sign = trend_slope_shift.iloc[0] > 0
-        for e, i in enumerate(trend_slope_shift):
-            if i != 0:
-                i_sign = i > 0
-                if now_sign != i_sign:
-                    if now_sign:
-                        info_list.append('max')
-                    else:
-                        info_list.append('min')
-                    now_sign = i_sign
-                else:
-                    info_list.append('up' if i_sign else 'down')
-            else:
-                info_list.append('keep')
-        info_list.append('')
-
-        return pd.Series(info_list, index=trend_slope.index, name=f'{trend_slope.name}_trend_info')
-    
-    def trend_info(self, x=None, trend=None, trend_slope=None, filter=None, rolling=None, **kwargs):
-        self.params.update(kwargs)
-        input_trend_slope = self.trend_slope_ if trend_slope is None else trend_slope
-        if input_trend_slope is None:
-            input_trend_slope = self.trend_slope(x, trend, filter, rolling, **self.params)
-            
-        self.trend_info_ = self.calc_trend_info(input_trend_slope)
-        return self.trend_info_ 
-
-    # 【 Summary 】
-    def fit(self, x=None, trend=None, trend_slope=None, filter=None, rolling=None, **kwargs):
-        self.params.update(kwargs)
-        self.x = self.x if x is None else x
-        self.trend_info(self.x, trend, trend_slope, filter, rolling, **self.params)
-        
-        self.summary = pd.concat([self.x, self.cycle, self.trend, self.trend_slope_, self.trend_info_], axis=1)
-        self.summary.columns = [self.x.name, 'cycle', 'trend', 'trens_slope', 'trend_info']
-        return self.summary
 
