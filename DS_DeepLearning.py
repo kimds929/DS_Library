@@ -8,6 +8,19 @@ from collections import OrderedDict
 
 
 
+# shape
+import pyperclip
+def shape(x):
+    shape_result = []
+    try:
+        shape_result.append(x.shape)
+    except:
+        for xe in x:
+            shape_result.append(xe.shape)
+    print(*shape_result)
+    pyperclip.copy(str(shape_result))
+
+
 # epoch_time
 def epoch_time(start_time, end_time):
     elapsed_time = end_time - start_time
