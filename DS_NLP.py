@@ -84,23 +84,25 @@ class NLP_Preprocessor():
         for i in sorted(np.unique(list(self.word_counts.values()))):
             filtered_count = len( dict(filter(lambda e: e[1]<=i, self.word_counts.items())) )
             prob =  filtered_count / total_cnt     # 특정 빈도수 이하 단어 비율
-            rare_dict[i] = prob
+            word_count = total_cnt + 1 - filtered_count
+            rare_dict[i] = (prob, word_count)
+            
 
         # 단어 수별 점유비
         rare_cum_prob = []
         for p in [0.7, 0.8, 0.9, 0.95, 0.99]:
-            target_cum_prob = list(tuple(filter(lambda e: e[1] < p, sorted(rare_dict.items())))[-1])
-            rare_cum_prob.append([*target_cum_prob, p] )
-        rare_cum_prob   # word_count, prob, target_prob
+            target_cum_prob = list(tuple(filter(lambda e: e[1][0] < p, sorted(rare_dict.items())))[-1])
+            rare_cum_prob.append([target_cum_prob[0], *target_cum_prob[1], p] )
+        # rare_cum_prob   # word_count, prob, word_count target_prob
 
         # 점유비 Plot
         fig = plt.figure()
         plt.title(f"Ratio of Rare_Word (total: {total_cnt})")
-        plt.plot(rare_dict.keys(), rare_dict.values(), 'o-')
+        plt.plot(rare_dict.keys(), np.array(list(rare_dict.values()))[:,0], 'o-')
         plt.xscale('log')
-        for cp, p, tp in rare_cum_prob:
+        for cp, p, wc, tp in rare_cum_prob:
             plt.axhline(p, color='red', alpha=0.1)
-            plt.text(cp, p, f"    {cp} (nw: {total_cnt +1 - cp})\n ←   ({round(p*100,1)}%, aim:{int(tp*100)}%)", color='red')
+            plt.text(cp, p, f"    {cp} (nw: {wc})\n ←   ({round(p*100,1)}%, aim:{int(tp*100)}%)", color='red')
             plt.scatter(cp, p, color='red')
         plt.xlabel('Word_Count (log_scale)')
         plt.ylabel('Word_Prob')
@@ -115,20 +117,23 @@ class NLP_Preprocessor():
 
         self.tokenizer = None
 
-    def tokenizer(self, filter_words=None, num_words=None, filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ', char_level=False, oov_token=None, document_count=0, **kwargs):
-        if filter_word is not None:
+    def tokenize(self, filter_words=None, num_words=None, filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ', char_level=False, oov_token=None, document_count=0, **kwargs):
+        if (num_words is None) and (filter_words is not None):
             num_words = self.word_counts +1 - filter_words
         self.tokenizer = tf.keras.preprocessing.text.Tokenizer(num_words=num_words, filters=filters, lower=lower,
                         split=split, char_level=char_level, oov_token=oov_token, document_count=document_count, **kwargs)
 
     def fit_on_texts(self, texts=None, filter_words=None, num_words=None, filters='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n', lower=True, split=' ', char_level=False, oov_token=None, document_count=0, **kwargs):
         texts = texts if texts is not None else self.texts
-        if self.tokenizer is None:
-            if filter_word is not None:
-                num_words = self.word_counts +1 - filter_words
-            self.tokenizer(num_words=num_words, filters=filters, lower=lower,
-                        split=split, char_level=char_level, oov_token=oov_token, document_count=document_count, **kwargs)
-        
+        options = [filter_words is None, num_words is None, lower is True, split==' ', filters=='!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n'
+                ,char_level==False, oov_token==None, document_count==0, len(kwargs)==0]
+        if (np.array(options).all() == False) or (self.tokenizer is None) :
+            if filter_words is not None:
+                num_words = self.word_counts - filter_words
+            self.tokenize(filter_words=filter_words, num_words=num_words, filters=filters, lower=lower,
+                        split=split, char_level=char_level, oov_token=oov_token, 
+                        document_count=document_count, **kwargs)
+            
         self.tokenizer.fit_on_texts(texts)
         self.fit_token = True
         
@@ -139,14 +144,27 @@ class NLP_Preprocessor():
 
         self.word_index = self.tokenizer.word_index
         self.index_word = self.tokenizer.index_word
-        self.vocab_size = len(self.word_index) + 1
+        self.vocab_size = len(self.word_index) + 1 if self.tokenizer.num_words is None else self.tokenizer.num_words+1
         return self
 
-    def texts_to_sequences(self, texts=None, inplace=True, verbose=1):
+    def texts_to_sequences(self, texts=None, inplace=True, dropna=True, verbose=1):
         texts = texts if texts is not None else self.texts
 
         texts_result = self.tokenizer.texts_to_sequences(texts)
 
+        if dropna is True:
+            filtered_seq = []
+            filtering_index = []
+            filtering_index_TF = []
+            for idx, c in enumerate(texts_result):
+                filtering_index_TF.append(len(c) > 0)
+                if filtering_index_TF[-1] is True:
+                    filtered_seq.append(c)
+                    filtering_index.append(idx)
+            texts_result = filtered_seq
+            self.texts_index = filtering_index
+            self.texts_index_TF = filtering_index_TF
+            
         self.texts_texts_to_seq = texts_result
         if verbose > 0:
             print("→ self.texts_texts_to_seq")
@@ -259,7 +277,7 @@ class NLP_Preprocessor():
         if inplace:
             self.texts = texts_result
         return self
-    
+
     def sequences_to_texts(self, texts, index_word=None, join=None, 
                                 sos_text=False, eos_text=False, padding_text=False, sos=None, eos=None):
         index_word = index_word if index_word is not None else self.index_word
@@ -337,7 +355,6 @@ class NLP_Preprocessor():
 # processor_kr.sequences_to_texts(processor_kr.texts, join=' ')
 
 # processor_kr.texts_to_sequence_transform('저는 사과를 좋아합니다')
-
 
 
 
