@@ -1,7 +1,8 @@
 # DataSet ########################################################################
-# import numpy as np
-# import torch
+import numpy as np
+import torch
 from sklearn.model_selection import train_test_split
+
 class TorchDataLoader():
     def __init__(self, *args, split_size=(0.7, 0.1, 0.2), random_state=None, **kwargs):
         self.args = args
