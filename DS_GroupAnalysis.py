@@ -5,6 +5,7 @@ import pandas as pd
 
 from IPython.display import clear_output
 
+from DS_DataFrame import *
 import DS_OLS
 
 
@@ -37,12 +38,6 @@ def fun_Search(data, on, method='in', case=True):
         result.remove(np.nan)
     return result
 
-
-# 어떤 값에 대하여 자동으로 소수점 자리수를 부여
-def fun_Decimalpoint(value):
-    point_log10 = np.floor(np.log10(abs(value)))
-    point = int((point_log10 - 3)* -1) if point_log10 >= 0 else int((point_log10 - 2)* -1)
-    return point
 
 
 # 입력기준값을 기준으로 Min, Max값을 도출하는 함수

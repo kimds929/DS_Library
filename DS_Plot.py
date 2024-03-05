@@ -394,6 +394,7 @@ def distbox(data, on, group=None, figsize=[5,5], title='auto', bins=None,
         axes[0].legend()
         axes[0].set_xscale(xscale)
         
+        print(group)
         # boxplot
         boxes = sns.boxplot(x=on, y=group, data=normal_data, 
                 orient='h', color='white', linewidth=1, ax=axes[1],
@@ -432,7 +433,7 @@ def distbox(data, on, group=None, figsize=[5,5], title='auto', bins=None,
             axes[0].axvline(x=group_mean, c=box_colors[0], alpha=0.5)
         # boxplot
         axes[0].set_xscale(xscale)
-        boxes = sns.boxplot(data=normal_data, x=[on], orient='h', color='white', linewidth=1, ax=axes[1])
+        boxes = sns.boxplot(data=normal_data, x=on, orient='h', color='white', linewidth=1, ax=axes[1])
         
         # mean_points
         plt.scatter(x=group_mean, y=[0], color=box_colors[0], edgecolors='white', s=70)
@@ -832,7 +833,7 @@ def fun_Hist(data, x, figsize=[6,4], bins=10, density=False,
 
 # violin_box_plot
 def violin_box_plot(x=None, y=None, data=None, group=None, figsize=None,
-    title=None, color=None, label=None, return_plot=True):
+    title=None, color=None, label=None, alpha=0.13, return_plot=True):
     if data is None:
         if len(x) != len(y):
             raise 'Different length error between x and y'
@@ -876,7 +877,9 @@ def violin_box_plot(x=None, y=None, data=None, group=None, figsize=None,
         std = auto_decimal(x.std())
         return f'mean {mean},  std {std}'
 
-    box_data_dict = {gi: np.array(gv[y]) for gi, gv in violin_box_data.groupby(x)}
+    box_data_dict_ = {gi: np.array(gv[y]) for gi, gv in violin_box_data.groupby(x,dropna=True)}
+    box_data_dict = {gi: np.array([np.nan, np.nan]) if len(gv) == 0 else gv for gi, gv in box_data_dict_.items()}
+    
     box_describe_dict = {gi: describe_string(gv[y]) for gi, gv in violin_box_data.groupby(x)}
 
     if return_plot:
@@ -891,11 +894,11 @@ def violin_box_plot(x=None, y=None, data=None, group=None, figsize=None,
     if type(color) is list:
         assert len(color) == len(top_violin['bodies']), 'lengths are different'
         for tv, c in zip(top_violin['bodies'], color):
-            tv.set_alpha(0.13)
+            tv.set_alpha(alpha)
             tv.set_facecolor(c)
     else:
         for tv in top_violin['bodies']:
-            tv.set_alpha(0.13)
+            tv.set_alpha(alpha)
             if color is not None:
                 tv.set_facecolor(color)
     top_violin['cbars'].set_color('none')

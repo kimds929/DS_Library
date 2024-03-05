@@ -2,6 +2,8 @@
 import numpy as np
 import pandas as pd
 from IPython.display import clear_output
+# clear_output(wait=True)
+from scipy import stats
 
 import statsmodels.api as sm
 from statsmodels.tools.eval_measures import rmse
@@ -20,6 +22,99 @@ def Fun_LoadData(datasetName):
     for i in range(0, len(load_data.target_names)):
         df.at[df[df['Target'] == i].index, 'Target'] = str(load_data.target_names[i])   # 특정값 치환
     return df
+
+
+# ?ElasticNet
+# ?ElasticNetCV
+
+# --- 【 Model Preprocessing 】 ------------------------------------------------------------------------------------------
+def fun_add_constant(X):
+    type_x = type(X)
+    ones_array = np.ones(X.shape[0]).reshape((-1,1))
+    if type_x == np.ndarray:
+        return np.concatenate([ones_array, X.to_numpy()], axis=1)
+    elif type_x == pd.Series:
+        return pd.concat([pd.DataFrame(ones_array, columns=['const']), X], axis=1)['const']
+    elif type_x == pd.DataFrame:
+        return pd.concat([pd.DataFrame(ones_array, columns=['const']), X], axis=1)
+
+def fun_c_matrix(X):
+    return np.linalg.inv(X.T @ X)
+
+def fun_c_matrix_jj(X):
+    return np.diag(fun_c_matrix(X))
+
+# --- 【 Model Evaluation 】 ------------------------------------------------------------------------------------------
+def fun_evalueate_model(y_true, y_pred, X, const=True, resid=True):
+    result = {}
+    obs_dim = X.shape
+    n = obs_dim[0]
+    k = obs_dim[1]
+
+    result['df_total'] = n
+
+    if const:
+        const_array = np.ones(n).reshape((-1,1))
+        if type(X) == pd.DataFrame:
+            if 'const' in X.columns:
+                # np_x = X.drop(columns='const').to_numpy()
+                np_x = X.to_numpy()
+                k -= 1
+            else:
+                # np_x = X.to_numpy()
+                np_x = np.concatenate([np.ones(n).reshape((-1,1)), X.to_numpy()], axis=1)
+        else:
+            if type(X) == pd.Series:
+                np_x = X.to_frame().to_numpy()
+            else:
+                np_x = X.copy()
+
+            const_sum_index = np.argwhere(np_x.sum(axis=0) == n)
+            const_mean_index = np.argwhere(np_x.mean(axis=0) == 1)
+            if const_mean_index == const_sum_index:
+                # np_x = np.delete(arr=X, obj=const_sum_index, axis=1)
+                # np_x = X.copy()
+                k -= 1
+            else:
+                # np_x = X.copy()
+                np_x = np.concatenate([np.ones(n).reshape((-1,1)), np_x], axis=1)
+        result['df_total'] -= 1
+    
+    result['df_resid'] = result['df_total'] - k
+    result['df_model'] = k
+
+    if type(y_true) == np.ndarray:
+        y_true_np = y_true.ravel().copy()
+    else:
+        y_true_np = y_true.to_numpy().ravel()
+
+    if type(y_pred) == np.ndarray:
+        y_pred_np = y_pred.ravel().copy()
+    else:
+        y_pred_np = y_pred.to_numpy().ravel()
+
+    if const:
+        y_bar = y_true_np.mean()
+    else:
+        y_bar = 0
+
+    resid_np = (y_true_np - y_pred_np).reshape((-1,1))
+    if resid:
+        result['resid'] = resid_np
+
+    result['sse'] = (resid_np**2).sum()        # SSE
+    result['ssr'] = ((y_pred - y_bar)**2).sum()         # SSR
+    result['sst'] = result['ssr'] + result['sse']
+
+    result['mse'] = result['sse'] / result['df_resid']
+    result['msr'] = result['ssr'] / result['df_model']
+    result['mst'] = result['sst'] / result['df_total']
+
+    result['fvalue'] = result['msr'] / result['mse']
+    result['rsquared'] = 1 - result['sse'] / result['sst']
+    result['rsquared_adj'] = 1 - (result['sse']/result['df_resid']) / (result['sst']/result['df_total'])
+    return result
+
 
 
 # --- 【 Regression 】------------------------------------------------------------------------------------------

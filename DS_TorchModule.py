@@ -1,7 +1,7 @@
 import torch
 
-
 ####################################################################################################################################
+# (Python) Transformer Code 230328
 # ★★★ Transformer
 class Transformer(torch.nn.Module):
     def __init__(self, vocab_size_X, vocab_size_y, X_pad_idx=0, y_pad_idx=0,
@@ -452,3 +452,4 @@ class DecoderLayer(torch.nn.Module):
 # tr(x,y).shape
 # tr.predict(x).shape
 # tr.attention_score.shape
+ 

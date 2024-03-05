@@ -1259,7 +1259,7 @@ class FeatureInfluence():
 
         pred_y_temp = estimator.predict(grid_frame_apply)
         pred_y_temp = self.DataHandler.transform(pred_y_temp, apply_kind='pandas', apply_index=grid_frame.index, apply_columns=[self.y_name])
-        
+
         if encoderY is None and encoder is not None:
             encoderY = copy.deepcopy(encoder)
             for xc in self.train_X_info_split.data['columns']:
@@ -1315,10 +1315,12 @@ class FeatureInfluence():
         result = self.predict_from_train_X(train_X=train_X, grid_X=grid_X, conditions=conditions, n_points=n_points,
             estimator=estimator, encoder=encoder, encoderX=encoderX, encoderY=encoderY)
         grid_frame = result['grid_frame']
-
-        pred_y = pd.Series(result[y_name], name=y_name, index=result[y_name].index)
+        # return result
+        pred_y = pd.Series(result['pred_y'], name=y_name, index=result['pred_y'].index)
+        # pred_y = pd.Series(result[y_name], name=y_name, index=result[y_name].index)
     
         predictable_frame = self.predictable_check(target_data=grid_frame, criteria_data=train_X)
+        unpredict = pd.Series()
         if len(predictable_frame) > 0:
             unpredict = pred_y[predictable_frame['unpred']]
 
@@ -1379,7 +1381,7 @@ class FeatureInfluence():
         # data_set
         pred_result = self.predict_from_train_X(train_X=train_X, conditions=apply_condition, n_points=n_points,
                     estimator=self.estimator, encoder=self.encoder, encoderX=self.encoderX, encoderY=self.encoderY)
-        
+
         grid_frame = pred_result['grid_frame']
         pred_y = pd.Series(pred_result['pred_y'], name=y_name)
         predictable_frame = self.predictable_check(target_data=grid_frame, criteria_data=train_X)

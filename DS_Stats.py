@@ -26,3 +26,4 @@ def anova(*args, equal_var=False):
         f = sum(wi * (mi - m)**2) /((dfbn) * (1 + 2 * (dfbn - 1) * tmp))
         prob = sp.special.fdtrc(dfbn, dfwn, f)   # equivalent to stats.f.sf
         return F_onewayResult(f, prob)
+

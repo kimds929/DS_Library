@@ -8,19 +8,6 @@ from collections import OrderedDict
 
 
 
-# shape
-import pyperclip
-def shape(x):
-    shape_result = []
-    try:
-        shape_result.append(x.shape)
-    except:
-        for xe in x:
-            shape_result.append(xe.shape)
-    print(*shape_result)
-    pyperclip.copy(str(shape_result))
-
-
 # epoch_time
 def epoch_time(start_time, end_time):
     elapsed_time = end_time - start_time
@@ -135,7 +122,7 @@ class EarlyStopping():
         
         # reference_score
         if reference_score is not None:
-            plt.plot(metrics_frame['epoch'], metrics_frame[label_r_score], 'o-', alpha=0.5, color='orange', label=label_r_score)
+            plt.plot(metrics_frame['epoch'], metrics_frame[label_r_score], alpha=0.5, color='orange', label=label_r_score)
             
         plt.plot(metrics_frame['epoch'], metrics_frame[label_score], alpha=0.5, color='steelblue', label=label_score)
         plt.legend(loc='upper right')

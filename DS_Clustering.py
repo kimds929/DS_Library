@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 
 # Plotting Function -----------------------------------------------------------------------
 def clustering_plot(X, labels=[], centers=[], title=None, figsize='auto', alpha=1,

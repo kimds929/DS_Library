@@ -461,15 +461,12 @@ class Describe():
         # if x
 
         q_list = []
-        if 0.25 not in q_list:
-            q_list.append(0.25)
-        if 0.75 not in q_list:
-            q_list.append(0.75)
 
         for q_i in np.array(q):
             q_list.append(Quantile(q_i))
         quantiles = x.agg(q_list)
-   
+        
+       
         iqr = quantiles['q75'] - quantiles['q25']
 
         self.uof_box = quantiles['q75'] + 3 * iqr    # upper inner fence
@@ -2636,7 +2633,7 @@ class EncoderVector:
      . fit_transform
      . inverse_transform
      . get_params
-     . get_feature_names
+     . get_feature_names_out
     """
     def __init__(self, encoder='OneHotEncoder', **kwargs):
         self.name='undefined'
@@ -2660,7 +2657,7 @@ class EncoderVector:
         
         if 'OneHotEncoder' in encoder_str:
             self.encoder.fit(fitted_series.to_frame())
-            self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
+            self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
         elif 'LabelEncoder' in encoder_str:
             self.encoder.fit(fitted_series)
             self.transformed_names = [self.fitted_object.data['name']]
@@ -2686,12 +2683,12 @@ class EncoderVector:
             apply_name = self.transformed_names
         elif apply_name is False:
             if 'OneHotEncoder' in encoder_str:
-                apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
+                apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
             else:
                 apply_name = [transformed_object.data['name']]
         else:
             if 'OneHotEncoder' in encoder_str:
-                apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names()))
+                apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names_out()))
             else:
                 apply_name = apply_name
 
@@ -2761,7 +2758,7 @@ class EncoderVector:
     def get_params(self):
         return self.encoder.get_params()
 
-    def get_feature_names(self):
+    def get_feature_names_out(self):
         return np.array(self.transformed_names)
 
     def __repr__(self):
