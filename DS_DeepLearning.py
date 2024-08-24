@@ -140,7 +140,7 @@ class TorchModeling():
 
             # scheduler ---------------------------------------------------------
             if scheduler is not None:
-                scheduler.step()
+                self.scheduler.step()
 
             with torch.no_grad():
                 # valid Loop ---------------------------------------------------------
