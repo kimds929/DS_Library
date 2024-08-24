@@ -2661,7 +2661,10 @@ class EncoderVector:
         
         if 'OneHotEncoder' in encoder_str:
             self.encoder.fit(fitted_series.to_frame())
-            self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
+            try:
+                self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
+            except:
+                self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
         elif 'LabelEncoder' in encoder_str:
             self.encoder.fit(fitted_series)
             self.transformed_names = [self.fitted_object.data['name']]
@@ -2687,12 +2690,18 @@ class EncoderVector:
             apply_name = self.transformed_names
         elif apply_name is False:
             if 'OneHotEncoder' in encoder_str:
-                apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
+                try:
+                    apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
+                except:
+                    apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
             else:
                 apply_name = [transformed_object.data['name']]
         else:
             if 'OneHotEncoder' in encoder_str:
-                apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names_out()))
+                try:
+                    apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names_out()))
+                except:
+                    apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names()))
             else:
                 apply_name = apply_name
 
