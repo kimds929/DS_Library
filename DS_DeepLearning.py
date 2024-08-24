@@ -139,7 +139,7 @@ class TorchModeling():
                     self.train_metrics.append(print_info['train_metrics'])
 
             # scheduler ---------------------------------------------------------
-            if scheduler is not None:
+            if self.scheduler is not None:
                 self.scheduler.step()
 
             with torch.no_grad():
