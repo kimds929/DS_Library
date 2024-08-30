@@ -129,7 +129,9 @@ class TorchModeling():
 
         if optimizer is not None:
             self.optimizer = optimizer
-            self.scheduler.optimizer = self.optimizer
+
+            if self.scheduler is not None:
+                self.scheduler.optimizer = self.optimizer
 
         if loss_function is not None:
             self.loss_function = loss_function
