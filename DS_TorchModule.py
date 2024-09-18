@@ -263,11 +263,12 @@ class EncoderLayer(torch.nn.Module):
 
 # ☆ MultiHeadAttentionLayer
 class MultiHeadAttentionLayer(torch.nn.Module):
-    def __init__(self, embed_dim=256, n_heads=4, dropout=0, same_qkv=False):
+    def __init__(self, embed_dim=256, output_dim=None, n_heads=4, dropout=0, same_qkv=False):
         super().__init__()
         assert embed_dim % n_heads == 0, 'embed_dim은 n_head의 배수값 이어야만 합니다.'
 
         self.embed_dim = embed_dim
+        self.output_dim = embed_dim if output_dim is None else output_dim
         self.n_heads = n_heads
         self.head_dim = embed_dim // n_heads
 
@@ -276,7 +277,7 @@ class MultiHeadAttentionLayer(torch.nn.Module):
         self.value_layer = torch.nn.Linear(embed_dim, embed_dim)
 
         self.att_layer = ScaledDotProductAttention(embed_dim ** (1/2), dropout)
-        self.fc_layer = torch.nn.Linear(embed_dim, embed_dim)
+        self.fc_layer = torch.nn.Linear(embed_dim, output_dim)
         self.same_qkv = same_qkv
 
     def forward(self, x, mask=None):
@@ -304,7 +305,7 @@ class MultiHeadAttentionLayer(torch.nn.Module):
         self.weighted_flatten = self.weighted_arange.view(batch_size, -1, self.embed_dim)   # (B, QL, E) ← (B, H, E)
 
         # self.multihead_output = self.fc_layer(self.weighted_flatten)       # (B, QL, FC)
-        self.multihead_output = self.fc_layer(self.weighted_flatten).view(query.size())       # (B, QL, FC) to input shape
+        self.multihead_output = self.fc_layer(self.weighted_flatten).view([*query.size()[:-1], self.output_dim])       # (B, QL, FC) to input shape
         return self.multihead_output       #  (batch_seq, query_length, fc_dim)
 
 
