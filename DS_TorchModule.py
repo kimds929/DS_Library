@@ -277,7 +277,7 @@ class MultiHeadAttentionLayer(torch.nn.Module):
         self.value_layer = torch.nn.Linear(embed_dim, embed_dim)
 
         self.att_layer = ScaledDotProductAttention(embed_dim ** (1/2), dropout)
-        self.fc_layer = torch.nn.Linear(embed_dim, output_dim)
+        self.fc_layer = torch.nn.Linear(embed_dim, self.output_dim)
         self.same_qkv = same_qkv
 
     def forward(self, x, mask=None):
