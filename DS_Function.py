@@ -43,6 +43,173 @@ import datetime
 # ic.convert(path1, output='ipynb')
 
 
+# 【 Data function 】  ################################################################################
+
+
+# ★ argmax with duplicated max number (max 값이 여러개일 때, max값 중 랜덤하게 sample해주는 함수)
+def rand_argmax(a, axis=None, return_max=False, random_state=None):
+    rng = np.random.RandomState(random_state)
+    if axis is None:
+        mask = (a == a.max())
+        idx = rng.choice(np.flatnonzero(mask))
+        if return_max:
+            return idx, a.flatten()[idx]
+        else:
+            return idx
+    else:
+        mask = (a == a.max(axis=axis, keepdims=True))
+        idx = np.apply_along_axis(lambda x: rng.choice(np.flatnonzero(x)), axis=axis, arr=mask)
+        expanded_idx = np.expand_dims(idx, axis=axis)
+        if return_max:
+            return idx, np.take_along_axis(a, expanded_idx, axis=axis)
+        else:
+            return idx
+
+
+
+# Dictionary를 보기좋게 Printing 해주는 함수
+def print_dict(d, indent=0):
+    for key, value in d.items():
+        if isinstance(value, dict):
+            print('\t' * indent + '【'+ str(key) + '】')
+            print_dict(value, indent+1)
+        else:
+            print('\t' * indent + '【'+ str(key) + '】', end=' : ')
+            print(str(value))
+
+
+# 정의된 변수명을 return하는 함수
+def get_variable_name(var):
+    callers_local_vars = inspect.currentframe().f_back.f_locals.items()
+    return [var_name for var_name, var_val in callers_local_vars if var_val is var][0]
+
+
+# DecimalPoint : 어떤 값에 대하여 자동으로 소수점 자리수를 부여
+def fun_Decimalpoint(value):
+    if value == 0:
+        return 3
+    try:
+        point_log10 = np.floor(np.log10(abs(value)))
+        point = int((point_log10 - 3)* -1) if point_log10 >= 0 else int((point_log10 - 2)* -1)
+    except:
+        point = 0
+    return point
+
+# 'num ~ num' format data → [num, num]
+def criteria_split(criteria, error_handle=np.nan):
+    try:
+        if criteria == '' or pd.isna(criteria):
+            return [np.nan, np.nan]
+        else:
+            criteria_list = list(map(lambda x: x.strip(), criteria.split('~')))
+            criteria_list[0] = -np.inf if criteria_list[0] == '' else float(criteria_list[0])
+            criteria_list[1] = np.inf if criteria_list[1] == '' else float(criteria_list[1])
+            return criteria_list
+    except:
+        if error_handle == 'error':
+            raise ValueError("An unacceptable value has been entered.\n .Allow format : num ~ num ")
+        else:
+            return [error_handle] * 2
+    
+# 'num ~ num' format series → min: [num...], max: [num...] seriess
+def lsl_usl_split(criteria_data):
+    if criteria_data.ndim == 1:
+        splited_series = criteria_data.apply(lambda x: pd.Series(criteria_split(x))).apply(lambda x: x.drop_duplicates().apply(lambda x: x if -np.inf < x < np.inf else np.nan ).sort_values().dropna().to_list(), axis=0)
+        splited_series.index = ['lsl','usl']
+        splited_series.name = criteria_data.name
+        return splited_series.to_dict()
+    elif criteria_data.ndim == 2:
+        result_dict = {}
+        for c in criteria_data:
+            splited_series = criteria_data[c].apply(lambda x: pd.Series(criteria_split(x))).apply(lambda x: x.drop_duplicates().apply(lambda x: x if -np.inf < x < np.inf else np.nan ).sort_values().dropna().to_list(), axis=0)
+            splited_series.index = ['lsl','usl']
+            splited_series.name = c
+            result_dict[c] =  splited_series.to_dict()
+        return result_dict
+
+
+
+# 특정 값이나 vector에 자동으로 소수점 부여
+# function auto_formating
+def auto_formating(x, criteria='max', return_type=None, decimal=None, decimal_revision=0, thousand_format=True):
+    special_case=False
+    if type(x) == str:
+        return x
+    
+    x_type_str = str(type(x))
+    if 'int' in x_type_str or 'float' in x_type_str:
+        if np.isnan(x) or x is np.nan:
+            return np.nan
+        x_array = np.array([x])
+    else:
+        x_array = np.array(x)
+    
+    x_Series_dropna = pd.Series(x_array[np.isnan(x_array) == False])        
+
+    # 소수점 자릿수 Auto Setting
+    if decimal is None:
+        if criteria == 'median':
+            quantile = Quantile(q=0.5)
+            criteria_num = quantile(x_Series_dropna)
+        elif 'q' in criteria:
+            quantile = Quantile(q=float(criteria.replace('q',''))/100)
+            criteria_num = quantile(x_Series_dropna)
+        elif criteria == 'mode':
+            criteria_num = x_Series_dropna.mode()[0]
+        else:
+            criteria_num = eval('x_Series_dropna.' + criteria + '()')
+
+        decimal = fun_Decimalpoint(criteria_num) + decimal_revision
+    
+    # 소수점 자릿수에 따른 dtype 변환
+    if decimal < 1:
+        if x_Series_dropna.min() == -np.inf or x_Series_dropna.max() == np.inf:
+            result_Series = pd.Series(x_array).round().astype('float')
+            special_case = 'inf'
+        else:
+            result_Series = pd.Series(x_array).round().astype('Int64')
+    else:
+        result_Series = pd.Series(x_array).apply(lambda x: round(x, decimal))
+    
+    # Output dtype 변환
+    if return_type == 'str':
+        result_Series = result_Series.apply(lambda x: '' if (type(x) == pd._libs.missing.NAType or np.isnan(x) or x is np.nan) else str(x) )
+        if thousand_format:
+            if decimal < 1:
+                result_Series = result_Series.apply(lambda x: '' if x == '' else (str(x) if abs(float(x)) == np.inf else format(int(x), ',')) )
+                # result_Series = result_Series.apply(lambda x: '' if x == '' else format(int(x), ','))
+            else:    
+                result_Series = result_Series.apply(lambda x: '' if x == '' else format(float(x), ','))
+    elif return_type == 'float':
+        if decimal < 1:
+            result_Series = result_Series.round().astype('Int64')
+        else:
+            result_Series = result_Series.astype(float)
+    elif return_type == 'int':
+        result_Series = result_Series.round().astype('Int64')
+       
+    # Output Type에 따른 Return
+    if 'str' in x_type_str or 'float' in x_type_str or 'int' in x_type_str:
+        if return_type is None:
+            if 'str' in x_type_str:
+                return str(result_Series[0])
+            elif 'float' in x_type_str:
+                if decimal < 1:
+                    if special_case == 'inf':
+                        return float(result_Series[0])
+                    else:
+                        return int(result_Series[0])
+                else:
+                    return float(result_Series[0])
+            elif 'int' in x_type_str:
+                return int(result_Series[0])
+        else:
+            return eval(return_type + '(result_Series[0])')
+    elif 'array' in x_type_str:
+        return np.array(result_Series)
+    elif 'Series' in x_type_str:
+        result_Series.index = x.index
+        return result_Series
 
 
 

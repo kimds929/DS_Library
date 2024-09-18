@@ -299,7 +299,8 @@ class MultiHeadAttentionLayer(torch.nn.Module):
         self.weighted_arange = self.weighted.permute(0,2,1,3).contiguous()        # (B, QL, H, HE) ← (B, H, QL, HE)
         self.weighted_flatten = self.weighted_arange.view(batch_size, -1, self.embed_dim)   # (B, QL, E) ← (B, H, E)
 
-        self.multihead_output = self.fc_layer(self.weighted_flatten)       # (B, QL, FC)
+        # self.multihead_output = self.fc_layer(self.weighted_flatten)       # (B, QL, FC)
+        self.multihead_output = self.fc_layer(self.weighted_flatten).view(x[0].size())       # (B, QL, FC) : to input shape
         return self.multihead_output       #  (batch_seq, query_length, fc_dim)
 
 
