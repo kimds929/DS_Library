@@ -15,7 +15,7 @@ import scipy as sp
 
 from IPython.core.display import display, HTML
 
-import tqdm
+from tqdm import tqdm_notebook
 
 import inspect
 import re
@@ -1898,7 +1898,7 @@ class SummaryPlot():
         if len(columns) < 100 or continue_YN == 'Y':
             fig = plt.figure(figsize=(fig_ncols * 4, fig_nrows * 5))
             fig.subplots_adjust(hspace=1)   # 위아래, 상하좌우 간격
-            for idx, col in tqdm.tqdm_notebook( enumerate(columns, 1) ):
+            for idx, col in tqdm_notebook( enumerate(columns, 1) ):
                 # print(x, end=' ')         # Debugging Check
                 plt.subplot(int(fig_nrows)+1, fig_ncols, idx)
                 self.attribute_plot(data=data, x=col,

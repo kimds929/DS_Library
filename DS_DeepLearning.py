@@ -23,13 +23,15 @@ def epoch_time(start_time, end_time):
 
 # DeepLearning MDL Predict
 class PredictDL():
-    def __init__(self, model, input='torch'):
+    def __init__(self, model, input='torch', device='cpu'):
         self.model = model
         self.input = input
+        self.device = device
     
     def predict(self, x):
         if self.input == 'torch':
-            return self.model.predict(torch.FloatTensor(np.array(x))).numpy().ravel()
+            self.model.eval()
+            return self.model(torch.FloatTensor(np.array(x)).to(self.device)).to('cpu').detach().numpy().ravel()
 
 
 
