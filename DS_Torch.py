@@ -8,9 +8,7 @@ import torch
 
 from datetime import datetime
 from tqdm.notebook import tqdm
-
 from IPython.display import clear_output, display, update_display
-
 from sklearn.model_selection import train_test_split
 
 
@@ -74,7 +72,6 @@ class TorchDataLoader():
 
 
 
-
 class TorchModeling():
     def __init__(self, model, device='cpu'):
         self.now_date = datetime.strftime(datetime.now(), '%y%m%d_%H')
@@ -109,7 +106,7 @@ class TorchModeling():
                 point = 0
             return np.round(value, point)
 
-    def compile(self, optimizer, loss_function, metric_function=None, scheduler=None,
+    def compile(self, optimizer, loss_function=None, metric_function=None, scheduler=None,
                 early_stop_loss=None, early_stop_metrics=None):
         """
         loss_function(model, x, y) -> loss
@@ -151,8 +148,9 @@ class TorchModeling():
             early_stop_metrics.load(self.early_stop_metrics)
             self.early_stop_metrics = early_stop_metrics
 
-    def train_model(self, train_loader, valid_loader=None, epochs=10, tqdm_display=False,
-                early_stop=True, save_parameters=False, display_earlystop_result=False):
+    def train_model(self, train_loader, valid_loader=None, epochs=10, loss_function=None,
+                tqdm_display=False, early_stop=True, save_parameters=False, display_earlystop_result=False, optimizer_step=True):
+        loss_function = self.loss_function if loss_function is None else loss_function
         final_epcohs = self.t + epochs - 1
         # [START of Epochs Loop] ############################################################################################
         epochs_iter = tqdm(range(self.t, self.t + epochs), desc="Epochs", total=epochs, position=0, leave=True) if tqdm_display else range(self.t, self.t + epochs)
@@ -166,10 +164,12 @@ class TorchModeling():
             train_iter = tqdm(enumerate(train_loader), desc="Train Batch", total=len(train_loader), position=1, leave=False) if tqdm_display else enumerate(train_loader)
             for batch_idx, (batch_x, batch_y) in train_iter:
                 batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
-                self.optimizer.zero_grad()
-                loss = self.loss_function(self.model, batch_x, batch_y)
-                loss.backward()
-                self.optimizer.step()
+                loss = loss_function(self.model, batch_x, batch_y, self.optimizer)
+                
+                if optimizer_step is True:
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
             
                 with torch.no_grad():
                     train_epoch_loss.append( loss.to('cpu').detach().numpy() )
@@ -197,7 +197,7 @@ class TorchModeling():
                     for batch_idx, (batch_x, batch_y) in valid_iter:
                         batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
                         
-                        loss = self.loss_function(self.model, batch_x, batch_y)
+                        loss = loss_function(self.model, batch_x, batch_y)
                     
                         valid_epoch_loss.append( loss.to('cpu').detach().numpy() )
                         if self.metrics_function is not None:
