@@ -73,6 +73,14 @@ class TorchDataLoader():
 
 
 class TorchModeling():
+    """
+    self.__init__(model, device)
+    self.compile(optimizer, (loss_function))
+    self.train_model(train_loader, (valid_loader), epochs, (loss_function), (metrics_function))
+    
+    loss_function(model, batch, optimizer)
+    meteic_function(model, batch)
+    """
     def __init__(self, model, device='cpu'):
         self.now_date = datetime.strftime(datetime.now(), '%y%m%d_%H')
 
@@ -106,19 +114,19 @@ class TorchModeling():
                 point = 0
             return np.round(value, point)
 
-    def compile(self, optimizer, loss_function=None, metric_function=None, scheduler=None,
+    def compile(self, optimizer, loss_function=None, metrics_function=None, scheduler=None,
                 early_stop_loss=None, early_stop_metrics=None):
         """
         loss_function(model, x, y) -> loss
         """
         self.optimizer = optimizer
         self.loss_function = loss_function
-        self.metrics_function = metric_function
+        self.metrics_function = metrics_function
         self.scheduler = scheduler
         self.early_stop_loss = early_stop_loss
         self.early_stop_metrics = early_stop_metrics
 
-    def recompile(self, optimizer=None, loss_function=None, metric_function=None, scheduler=None,
+    def recompile(self, optimizer=None, loss_function=None, metrics_function=None, scheduler=None,
                 early_stop_loss=None, early_stop_metrics=None):
         if scheduler is not None:
             self.scheduler = scheduler
@@ -133,8 +141,8 @@ class TorchModeling():
         if loss_function is not None:
             self.loss_function = loss_function
         
-        if metric_function is not None:
-            self.metrics_function = metric_function
+        if metrics_function is not None:
+            self.metrics_function = metrics_function
 
         if early_stop_loss is not None:
             self.early_stop_loss.patience = early_stop_loss.patience
@@ -148,9 +156,10 @@ class TorchModeling():
             early_stop_metrics.load(self.early_stop_metrics)
             self.early_stop_metrics = early_stop_metrics
 
-    def train_model(self, train_loader, valid_loader=None, epochs=10, loss_function=None,
+    def train_model(self, train_loader, valid_loader=None, epochs=10, loss_function=None, metrics_function=None,
                 tqdm_display=False, early_stop=True, save_parameters=False, display_earlystop_result=False, optimizer_step=True):
         loss_function = self.loss_function if loss_function is None else loss_function
+        metrics_function = self.metrics_function if metrics_function is None else metrics_function
         final_epcohs = self.t + epochs - 1
         # [START of Epochs Loop] ############################################################################################
         epochs_iter = tqdm(range(self.t, self.t + epochs), desc="Epochs", total=epochs, position=0, leave=True) if tqdm_display else range(self.t, self.t + epochs)
@@ -162,9 +171,9 @@ class TorchModeling():
             train_epoch_loss = []
             train_epoch_metrics = []
             train_iter = tqdm(enumerate(train_loader), desc="Train Batch", total=len(train_loader), position=1, leave=False) if tqdm_display else enumerate(train_loader)
-            for batch_idx, (batch_x, batch_y) in train_iter:
-                batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
-                loss = loss_function(self.model, batch_x, batch_y, self.optimizer)
+            for batch_idx, (batch) in train_iter:
+                batch_device = (batch_data .to(self.device) for batch_data in batch)
+                loss = loss_function(self.model, batch_device, self.optimizer)
                 
                 if optimizer_step is True:
                     self.optimizer.zero_grad()
@@ -174,7 +183,7 @@ class TorchModeling():
                 with torch.no_grad():
                     train_epoch_loss.append( loss.to('cpu').detach().numpy() )
                     if self.metrics_function is not None:
-                        train_epoch_metrics.append( self.metric_f(self.model, batch_x, batch_y) )
+                        train_epoch_metrics.append( self.metrics_function(self.model, batch_device) )
 
             with torch.no_grad():
                 print_info['train_loss'] = np.mean(train_epoch_loss)
@@ -194,14 +203,14 @@ class TorchModeling():
                     valid_epoch_loss = []
                     valid_epoch_metrics = []
                     valid_iter = tqdm(enumerate(valid_loader), desc="Valid Batch", total=len(valid_loader), position=1, leave=False) if tqdm_display else enumerate(valid_loader)
-                    for batch_idx, (batch_x, batch_y) in valid_iter:
-                        batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
+                    for batch_idx, (batch) in valid_iter:
+                        batch_device = (batch_data .to(self.device) for batch_data in batch)
                         
-                        loss = loss_function(self.model, batch_x, batch_y)
+                        loss = loss_function(self.model, batch_device)
                     
                         valid_epoch_loss.append( loss.to('cpu').detach().numpy() )
                         if self.metrics_function is not None:
-                            valid_epoch_metrics.append( self.metric_f(self.model, batch_x, batch_y) )
+                            valid_epoch_metrics.append( self.metrics_function(self.model, batch_device) )
 
                     print_info['valid_loss'] = np.mean(valid_epoch_loss)
                     self.valid_losses.append(print_info['valid_loss'])
@@ -266,17 +275,18 @@ class TorchModeling():
             # test Loop ---------------------------------------------------------
             if test_loader is not None and len(test_loader) > 0:
                 self.model.eval()
+                
                 test_epoch_loss = []
                 test_epoch_metrics = []
                 test_iter = tqdm(enumerate(test_loader), desc="Valid Batch", total=len(test_loader), position=1, leave=False) if tqdm_display else enumerate(test_loader)
-                for batch_idx, (batch_x, batch_y) in test_iter:
-                    batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
+                for batch_idx, (batch) in test_iter:
+                    batch_device = (batch_data .to(self.device) for batch_data in batch)
                     
-                    loss = self.loss_function(self.model, batch_x, batch_y)
+                    loss = self.loss_function(self.model, batch_device)
                 
                     test_epoch_loss.append( loss.to('cpu').detach().numpy() )
                     if self.metrics_function is not None:
-                        test_epoch_metrics.append( self.metric_f(self.model, batch_x, batch_y) )
+                        test_epoch_metrics.append( self.metrics_function(self.model, batch_device) )
 
                 print_info['test_loss'] = np.mean(test_epoch_loss)
                 self.test_losses.append(print_info['test_loss'])

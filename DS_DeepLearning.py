@@ -106,7 +106,10 @@ class EarlyStopping():
         plt.legend(loc='upper right')
         
         metrics_colors = ['steelblue', 'gold', 'red', 'green']
-        for me, (mgi, mgv) in enumerate(metrics_frame.groupby('event')):
+        # (pandas) .groupby 
+        #       - observed=False (default) : 모든 카테고리(데이터에 없는 값 포함)를 결과에 포함
+        #       - observed=True : 실제로 데이터에 존재하는 카테고리만 결과에 포함
+        for me, (mgi, mgv) in enumerate(metrics_frame.groupby('event', observed=False)):    
             plt.scatter(mgv['epoch'], mgv[label_score], color=metrics_colors[me])            
         for mi, mg in metrics_frame[metrics_frame['event'] != ''].iterrows():
             event_name = 'p' if mg['event'] == 'patience' else ('★' if mg['event']=='optimum' else ('break' if mg['event'] == 'break' else ''))
