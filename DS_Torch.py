@@ -86,7 +86,8 @@ class TorchModeling():
 
         self.model = model.to(device)
         self.device = device
-        self.t = 1
+        self.model_t = None
+        self.train_t = 1
 
         self.train_losses = []
         self.train_metrics = []
@@ -160,9 +161,9 @@ class TorchModeling():
                 tqdm_display=False, early_stop=True, save_parameters=False, display_earlystop_result=False, optimizer_step=True):
         loss_function = self.loss_function if loss_function is None else loss_function
         metrics_function = self.metrics_function if metrics_function is None else metrics_function
-        final_epcohs = self.t + epochs - 1
+        final_epcohs = self.train_t + epochs - 1
         # [START of Epochs Loop] ############################################################################################
-        epochs_iter = tqdm(range(self.t, self.t + epochs), desc="Epochs", total=epochs, position=0, leave=True) if tqdm_display else range(self.t, self.t + epochs)
+        epochs_iter = tqdm(range(self.train_t, self.train_t + epochs), desc="Epochs", total=epochs, position=0, leave=True) if tqdm_display else range(self.train_t, self.train_t + epochs)
         for epoch in epochs_iter:
             print_info = {}
 
@@ -233,8 +234,9 @@ class TorchModeling():
                 if self.early_stop_loss is not None:
                     score = print_info['valid_loss'] if (valid_loader is not None and len(valid_loader) > 0) else print_info['train_loss']
                     reference_score = print_info['train_loss'] if (valid_loader is not None and len(valid_loader) > 0) else None
-                    params = self.model.state_dict() if save_parameters else None
-                    early_stop_TF = self.early_stop_loss.early_stop(score=score, reference_score=reference_score,save=params, verbose=0)
+                    # params = self.model.state_dict() if save_parameters else None
+                    params = self.model.state_dict()
+                    early_stop_TF = self.early_stop_loss.early_stop(score=score, reference_score=reference_score, save=params, verbose=0)
 
                     if save_parameters:
                         path_save_loss = f"{self.get_save_path()}_earlystop_loss.pth"
@@ -243,7 +245,8 @@ class TorchModeling():
                 if self.metrics_function is not None and self.early_stop_metrics is not None:
                     score = print_info['valid_metrics'] if (valid_loader is not None and len(valid_loader) > 0) else print_info['train_metrics']
                     reference_score = print_info['train_metrics'] if (valid_loader is not None and len(valid_loader) > 0) else None
-                    params = self.model.state_dict() if save_parameters else None
+                    # params = self.model.state_dict() if save_parameters else None
+                    params = self.model.state_dict()
                     self.early_stop_loss.early_stop(score=score, reference_score=reference_score, save=params, verbose=0)
 
                     if save_parameters:
@@ -256,7 +259,8 @@ class TorchModeling():
                     cPickle.dump(self.model.state_dict(), open(path_save_weight, 'wb'))      # save earlystop weights
 
                 # step update ---------------------------------------------------------
-                self.t += 1
+                self.train_t += 1
+                self.model_t = self.train_t
 
                 # early_stop break ---------------------------------------------------------
                 if early_stop is True and early_stop_TF == 'break':
@@ -267,11 +271,24 @@ class TorchModeling():
                 display(self.early_stop_loss.plot)
             if self.metrics_function is not None and self.early_stop_metrics is not None:
                 display(self.early_stop_metrics.plot)
-        # [END of Epochs Loop] ############################################################################################
+    # [END of Epochs Loop] ############################################################################################
 
+    def set_best_model(self, t=None, pth_path=None):
+        if self.early_stop_loss is None:
+            print('There is no save point. (early_stop)')
+        elif (t is not None) and (pth_path is not None):
+            self.model_t = t
+            self.model.load(pth_path)
+            print('<All keys matched successfully>')
+        else:
+            optimum_point = self.early_stop_loss.optimum
+            self.model_t = optimum_point[0]
+            self.model.load_state_dict(optimum_point[2].state_dict)
+            print('<All keys matched successfully>')         
+    
     def test_model(self, test_loader, tqdm_display=False):
         with torch.no_grad():
-            print_info = {"epoch":self.t-1}
+            print_info = {"epoch":self.model_t-1}
             # test Loop ---------------------------------------------------------
             if test_loader is not None and len(test_loader) > 0:
                 self.model.eval()
@@ -280,7 +297,7 @@ class TorchModeling():
                 test_epoch_metrics = []
                 test_iter = tqdm(enumerate(test_loader), desc="Valid Batch", total=len(test_loader), position=1, leave=False) if tqdm_display else enumerate(test_loader)
                 for batch_idx, (batch) in test_iter:
-                    batch_device = (batch_data .to(self.device) for batch_data in batch)
+                    batch_device = (batch_data.to(self.device) for batch_data in batch)
                     
                     loss = self.loss_function(self.model, batch_device)
                 
@@ -294,9 +311,9 @@ class TorchModeling():
                     print_info['test_metrics'] = np.mean(test_epoch_metrics)
                     self.test_metrics.append(print_info['test_metrics'])
             print_sentences = ",  ".join([f"{k}: {str(self.fun_decimal_point(v))}" for k, v in print_info.items() if k != 'epoch'])
-            print(f"[After {self.t-1} epoch test performances] {print_sentences}")
+            print(f"[{self.model_t-1} epoch test performances] {print_sentences}")
             self.test_info.append(print_info)
-
+        return print_info
 
 
 # def gaussian_loss(model, x, y):

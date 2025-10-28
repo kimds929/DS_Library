@@ -11,6 +11,7 @@ from tqdm.notebook import tqdm
 from IPython.display import clear_output, display, update_display
 from collections import OrderedDict
 
+from time import sleep
 
 
 # epoch_time
@@ -34,6 +35,18 @@ class PredictDL():
             return self.model(torch.FloatTensor(np.array(x)).to(self.device)).to('cpu').detach().numpy().ravel()
 
 
+class TorchStateDict():
+    def __init__(self, state_dict):
+        self.state_dict = state_dict
+    
+    def state_dict(self):
+        return self.state_dict
+    
+    def __call__(self):
+        return self.state_dict
+    
+    def __repr__(self):
+        return "<class 'torch.state_dict()'>"
 
 
 class EarlyStopping():
@@ -125,7 +138,6 @@ class EarlyStopping():
             plt.close()
         return self.plot
 
-
     def early_stop(self, score, save=None, label=None,
                    reference_score=None, reference_save=None, reference_label=None,
                    verbose=0, sleep=0, save_all=False):
@@ -155,6 +167,9 @@ class EarlyStopping():
                     result = 'break'
                 else:
                     result = 'patience'
+        
+        if save is not None and 'collections.OrderedDict' in str(type(save)):
+            save = TorchStateDict(save)
         
         # state save
         state = (epoch, result, score, save, reference_score, reference_save) if (save_all is True or result == 'optimum') else (epoch, result, score, '', reference_score, '')
