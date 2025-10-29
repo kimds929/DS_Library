@@ -71,7 +71,8 @@ class EarlyStopping():
        . save_all:
      
     """
-    def __init__(self, patience=4, optimize='miminize'):
+    def __init__(self, min_iter=0, patience=4, optimize='miminize'):
+        self.min_iter = min_iter  # 최소 반복 횟수 저장
         self.patience = np.inf if patience is None else patience
         self.optimize = optimize
         
@@ -147,27 +148,40 @@ class EarlyStopping():
         label_score = 'valid_score' if label is None else label
         label_r_score = 'train_score' if reference_label is None else reference_label
         
-        if 'min' in self.optimize:
-            if score < self.optimum[1]:     # optimum
-                self.patience_scores = []
-                result = 'optimum'
-            else:
-                self.patience_scores.append(score)
-                if len(self.patience_scores) > self.patience:
-                    result = 'break'
-                else:
-                    result = 'patience'
-        elif 'max' in self.optimize:
-            if score > self.optimum[1]:     # optimum
-                self.patience_scores = []
-                result = 'optimum'
-            else:
-                self.patience_scores.append(score)
-                if len(self.patience_scores) > self.patience:
-                    result = 'break'
-                else:
-                    result = 'patience'
+        # min_iter 이전에는 patience 로직을 건너뛰고 optimum만 체크
+        if epoch < self.min_iter:
+            if 'min' in self.optimize:
+                if score < self.optimum[1]:
+                    self.patience_scores = []
+                    result = 'optimum'
+            elif 'max' in self.optimize:
+                if score > self.optimum[1]:
+                    self.patience_scores = []
+                    result = 'optimum'
         
+        # min_iter 이후 patience에 맞게 학습하여 early_stop
+        else:
+            if 'min' in self.optimize:
+                if score < self.optimum[1]:     # optimum
+                    self.patience_scores = []
+                    result = 'optimum'
+                else:
+                    self.patience_scores.append(score)
+                    if len(self.patience_scores) > self.patience:
+                        result = 'break'
+                    else:
+                        result = 'patience'
+            elif 'max' in self.optimize:
+                if score > self.optimum[1]:     # optimum
+                    self.patience_scores = []
+                    result = 'optimum'
+                else:
+                    self.patience_scores.append(score)
+                    if len(self.patience_scores) > self.patience:
+                        result = 'break'
+                    else:
+                        result = 'patience'
+            
         if save is not None and 'collections.OrderedDict' in str(type(save)):
             save = TorchStateDict(save)
         
