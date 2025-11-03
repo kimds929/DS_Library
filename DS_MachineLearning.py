@@ -33,6 +33,129 @@ import tensorflow as tf
 
 
 
+# Tabular(or 2D-matrix) Data에서 여러 dtype에 대해 유연하게 LabelEncoding을 적용하는 Class
+class TabularLabelEncoder:
+    def __init__(self, nan_value=-1, unseen_as_nan=False):
+        self.encoders = {}
+        self.feature_names = None
+        self.nan_replacements = {}
+        self.original_dtypes = {}
+        self.nan_value = nan_value
+        self.unseen_as_nan = unseen_as_nan
+    
+    def fit(self, X):
+        if isinstance(X, pd.DataFrame):
+            self.feature_names = list(X.columns)
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            self.feature_names = list(range(X.shape[1]))
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        for col in self.feature_names:
+            col_data = data[col]
+            self.original_dtypes[col] = col_data.dtype
+            
+            # object dtype이지만 내부 값이 전부 숫자면 숫자로 처리
+            if col_data.dtype == object:
+                try:
+                    col_data = pd.to_numeric(col_data)
+                except ValueError:
+                    pass
+            
+            le = LabelEncoder()
+            
+            if np.issubdtype(col_data.dtype, np.floating):
+                replacement = self.nan_value
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement).astype(np.int64)
+            elif np.issubdtype(col_data.dtype, np.integer):
+                replacement = self.nan_value
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement)
+            elif col_data.dtype == object:
+                replacement = '__missing__'
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement)
+            else:
+                raise ValueError(f"Unsupported dtype for column {col}: {col_data.dtype}")
+            
+            le.fit(col_data)
+            self.encoders[col] = le
+        
+        return self
+    
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        transformed = pd.DataFrame(index=data.index)
+        
+        for col in self.feature_names:
+            col_data = data[col]
+            
+            if col_data.dtype == object:
+                try:
+                    col_data = pd.to_numeric(col_data)
+                except ValueError:
+                    pass
+            
+            replacement = self.nan_replacements[col]
+            col_data = col_data.fillna(replacement)
+            
+            le = self.encoders[col]
+            known_classes = set(le.classes_)
+            
+            if self.unseen_as_nan:
+                # unseen 값을 NaN 대체값으로 변환
+                col_data = col_data.apply(lambda x: x if x in known_classes else replacement)
+                transformed[col] = le.transform(col_data)
+            else:
+                # unseen 값을 새로운 category로 추가
+                unseen_values = set(col_data) - known_classes
+                if unseen_values:
+                    le.classes_ = np.append(le.classes_, list(unseen_values))
+                transformed[col] = le.transform(col_data)
+        
+        return transformed
+    
+    def inverse_transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        inversed = pd.DataFrame(index=data.index)
+        
+        for col in self.feature_names:
+            le = self.encoders[col]
+            decoded = le.inverse_transform(data[col])
+            replacement = self.nan_replacements[col]
+            
+            decoded = np.where(decoded == replacement, np.nan, decoded)
+            inversed[col] = decoded
+        
+        return inversed
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+    def __repr__(self):
+        repr_str = "<customize.TabularLabelEncoder>"
+        if len(self.encoders) > 0:
+            encoders_str = '\n'.join([f"  {k}: {v}" for k, v in self.encoders.items()])
+            return repr_str + '\n{\n' + encoders_str + '\n}'
+        else:
+            return repr_str
+
+
 
 # ('matrix_info' : ('frame_info' : ['data', 'index', 'columns']), kind, dtypes, nuniques)
 # Vector 형태 (1차원 vector 또는 (-1,1) Shpaed Matrix)의 숫자형 데이터에 Scaler를 적용하는 Class
@@ -270,151 +393,6 @@ class EncoderVector:
 
 
 
-### ★★★ ###
-# Matrix/Frame/DataFrame 데이터에 Scaler 또는 Encoder를 적용하는 Class
-class ScalerEncoder:
-    """
-    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy, functools.reduce
-    【required (Function)】DataHandler, class_object_execution, ScalerVector, EncoderVector, dtypes_split
-
-    < Input >
-     . encoder : dictionay type {'columns' : Scaler/Encoder Object or String, ...}
-                      (default) {'#numeric' : 'StandardScaler', '#object':'OneHotEncoder', '#time', 'StandardScaler'}
-                * required Scaler/Encoder: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
-     . X : 1dim, 2dim vector or matrix
-
-    < Method >
-     . fit
-     . transform
-     . fit_transform
-     . inverse_transform
-    """
-    def __init__(self, encoder=None, **kwargs):
-        self.apply_encoder = {'#numeric':'StandardScaler', '#object':'OneHotEncoder', '#time': 'StandardScaler'}
-        if encoder is not None:
-            self.apply_encoder.update(encoder)
-
-        self.DataHandler = DataHandler()
-        self.kwargs = kwargs
-        self.encoder = {}
-        self.match_columns = {}
-
-    def fit(self, X):
-        self.encoder = {}
-
-        fitted_info = self.DataHandler.data_info(X, save_data=False)
-        self.fitted_ndim = fitted_info.ndim
-        self.fitted_object = self.DataHandler.data_info_split(X, ndim=2)
-
-        fitted_DataFrame = pd.DataFrame(**self.fitted_object.data).astype(self.fitted_object.dtypes)
-        
-        self.columns_dtypes = pd.DataFrame(dtypes_split(fitted_DataFrame, return_type='columns_all')).T
-
-        for c in fitted_DataFrame:
-            if c in self.apply_encoder.keys():
-                if 'scaler' in str(self.apply_encoder[c]).lower():
-                    se = ScalerVector(scaler=self.apply_encoder[c])
-                elif 'encoder' in str(self.apply_encoder[c]).lower():
-                    se = EncoderVector(encoder=self.apply_encoder[c])
-            else:
-                apply_se = self.apply_encoder['#' + self.columns_dtypes.loc[c, 'dtype_group']]
-                if 'scaler' in str(apply_se).lower():
-                    se = ScalerVector(scaler=apply_se)
-                elif 'encoder' in str(apply_se).lower():
-                    se = EncoderVector(encoder=apply_se)
-            se.fit(fitted_DataFrame[c])
-            self.encoder[c] = copy.deepcopy(se)
-            self.match_columns[c] = se.transformed_names
-
-    def transform(self, X, fitted_format=False, columns=None, ndim=None, kind=None):
-        transformed_info = self.DataHandler.data_info(X, save_data=False)
-        transformed_object = self.DataHandler.data_info_split(X, ndim=2)
-        
-        X_DataFrame = pd.DataFrame(**transformed_object.data).astype(transformed_object.dtypes)
-        if transformed_object.kind != 'pandas':
-            X_DataFrame.columns = self.encoder.keys() if columns is None else columns
-        
-        # transform ***
-        transformed_DataFrame = pd.DataFrame()
-        for c in X_DataFrame:
-            transformed_columnvector = pd.DataFrame(self.encoder[c].transform(X_DataFrame[c], fitted_format=True))
-            transformed_DataFrame = pd.concat([transformed_DataFrame, transformed_columnvector], axis=1)
-        
-        # return ***
-        if fitted_format:
-            apply_ndim = self.fitted_ndim if transformed_DataFrame.shape[1] == 1 else 2
-            return self.DataHandler.transform(transformed_DataFrame, apply_kind=self.fitted_object.kind, apply_ndim=apply_ndim)
-        else:
-            apply_kind = transformed_object.kind if kind is None else kind
-            apply_ndim = (transformed_info.ndim if ndim is None else ndim) if transformed_DataFrame.shape[1] == 1 else 2
-            return self.DataHandler.transform(transformed_DataFrame, apply_kind=apply_kind, apply_ndim=apply_ndim)
-        
-    def fit_transform(self, X, ndim=None, kind=None):
-        self.fit(X)
-        fitted_format = True if ndim is None and kind is None else False
-        return self.transform(X, fitted_format=fitted_format, ndim=ndim, kind=kind)
-
-    def inverse_transform(self, X, fitted_format=False, columns=None, ndim=None, kind=None, dtypes=None):
-        inversed_info = self.DataHandler.data_info(X, save_data=False)
-        inversed_object = self.DataHandler.data_info_split(X, ndim=2)
-        
-        X_DataFrame = pd.DataFrame(**inversed_object.data).astype(inversed_object.dtypes)
-        if inversed_object.kind != 'pandas':
-            X_DataFrame.columns = reduce(lambda x,y : x + y, self.match_columns.values()) if columns is None else columns
-
-        Xcolumns = copy.deepcopy(X_DataFrame.columns)
-        match_columns = copy.deepcopy(self.match_columns)
-
-        # inverse_transform ***
-        inversed_DataFrame = pd.DataFrame()
-        while bool(len(Xcolumns)):
-            inversed_target = pd.DataFrame()
-
-            c = Xcolumns[0]
-            Xcolumns = Xcolumns.drop(c)
-            # print(c, Xcolumns)
-            if type(dtypes) == dict:
-                if c in dtypes:
-                    apply_dtypes = dtypes[c]
-                else:
-                    apply_dtypes = None
-            else:       # bool, str, dtype
-                apply_dtypes = dtypes
-
-            for fc, tc in match_columns.items():
-                if c in tc:
-                    inversed_target = X_DataFrame[tc]
-
-                    del match_columns[fc]
-                    tc.remove(c)
-                    Xcolumns = Xcolumns.drop(tc)
-                    
-                    inversed_data = self.encoder[fc].inverse_transform(inversed_target, fitted_format=fitted_format, ndim=2, dtypes=apply_dtypes)
-                    inversed_data.columns = [self.encoder[fc].name]
-
-                    inversed_DataFrame = pd.concat([inversed_DataFrame, inversed_data], axis=1)
-                    break
-            
-            if c == X_DataFrame.columns[-1]:
-                break
-            
-        # return ***
-        if fitted_format:
-            apply_ndim = self.fitted_ndim if inversed_DataFrame.shape[1] == 1 else 2
-            # apply_dtypes = dict(filter(lambda x: x[0] in X_DataFrame.columns, self.fitted_object.dtypes.items()))
-            apply_dtypes = dict(filter(lambda x: x[0] in inversed_DataFrame.columns, self.fitted_object.dtypes.items()))
-            # print(inversed_DataFrame, self.fitted_object.kind, apply_ndim, apply_dtypes)
-            return self.DataHandler.transform(inversed_DataFrame, apply_kind=self.fitted_object.kind, 
-                    apply_ndim=apply_ndim, apply_dtypes=apply_dtypes)
-        else:
-            apply_kind = inversed_object.kind if kind is None else kind
-            apply_ndim = (inversed_info.ndim if ndim is None else ndim) if inversed_DataFrame.shape[1] == 1 else 2
-            return self.DataHandler.transform(inversed_DataFrame, apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes=dtypes)
-
-    def __repr__(self):
-        return f"(ScalerEncoder) {self.encoder}"
-
-
 
 ### ★★★ ###
 # Matrix/Frame/DataFrame 데이터에 Scaler 또는 Encoder를 적용하는 Class
@@ -559,6 +537,11 @@ class ScalerEncoder:
 
     def __repr__(self):
         return f"(ScalerEncoder) {self.encoder}"
+
+
+
+
+
 
 
 
@@ -2442,8 +2425,8 @@ import copy
 from collections import namedtuple
 
 # from sklearn.linear_model import LinearRegression
-# from sklearn.preprocessing import OneHotEncoder, LabelEncoder
-# from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.preprocessing import StandardScaler
 # from sklearn.ensemble import *
 
 # import sys
