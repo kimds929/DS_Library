@@ -286,7 +286,7 @@ class TorchModeling():
             self.model.load_state_dict(optimum_point[2].state_dict)
             print('<All keys matched successfully>')         
     
-    def test_model(self, test_loader, tqdm_display=False):
+    def test_model(self, test_loader, tqdm_display=False, verbose=0):
         with torch.no_grad():
             print_info = {"epoch":self.model_t-1}
             # test Loop ---------------------------------------------------------
@@ -311,7 +311,8 @@ class TorchModeling():
                     print_info['test_metrics'] = np.mean(test_epoch_metrics)
                     self.test_metrics.append(print_info['test_metrics'])
             print_sentences = ",  ".join([f"{k}: {str(self.fun_decimal_point(v))}" for k, v in print_info.items() if k != 'epoch'])
-            print(f"[{self.model_t-1} epoch test performances] {print_sentences}")
+            if verbose > 0:
+                print(f"[{self.model_t-1} epoch test performances] {print_sentences}")
             self.test_info.append(print_info)
         return print_info
 

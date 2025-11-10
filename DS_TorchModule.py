@@ -33,6 +33,19 @@ def make_tril_mask(x, pad_idx=0):
 
 
 # (Layer for Embedding)  ##################################################################################################
+class CategoricalEmbedding(nn.Module):
+    def __init__(self, n_features, num_embeddings, embedding_dim):
+        super().__init__()
+        self.embedding_weights = nn.Parameter(torch.randn((n_features, num_embeddings, embedding_dim)))
+    
+    def forward(self, x):
+        x_shape = x.shape
+        n_features = x_shape[-1]
+        
+        feature_idx = torch.arange(n_features).view(*([1] * (x.ndim - 1)), n_features).expand(*x_shape)
+        return self.embedding_weights[feature_idx, x]
+
+
 # Feature 마다 독립적으로 Embedding을 부여 : input feature → feature × embedding으로 linear하게 mapping
 #   . Embedding 이후 Feature간 connection이 없이 embedding 부여 가능
 class ContinuousEmbedding(nn.Module):
@@ -329,14 +342,14 @@ class LearnablePositionalEncoding(nn.Module):
         - 학습 가능한 파라미터를 통해 positional pattern을 데이터 기반으로 최적화 가능.
         - 사인/코사인 기반 fixed encoding보다 유연하나, extrapolation 능력(미학습 길이에 대한 일반화)은 낮음.
     """
-    def __init__(self, d_model, max_len=4096):
+    def __init__(self, num_embedding, d_model):
         """
         Args:
+        num_embedding (int):
+            positional embedding을 학습할 최대 sequence 길이.
+            
         d_model (int):
             모델의 hidden dimension 크기 (embedding 차원).
-
-        max_len (int, default=4096):
-            positional embedding을 학습할 최대 sequence 길이.
 
         Attributes:
             pos_embedding (nn.Embedding):
@@ -344,7 +357,7 @@ class LearnablePositionalEncoding(nn.Module):
                 각 위치 인덱스에 해당하는 학습 가능한 embedding 파라미터.
         """
         super().__init__()
-        self.position_embedding = nn.Embedding(max_len, d_model)
+        self.position_embedding = nn.Embedding(num_embedding, d_model)
 
     def forward(self, x):
         batch_size, seq_len, _ = x.size()
@@ -361,6 +374,28 @@ class LearnablePositionalEncoding(nn.Module):
 
 
 
+
+
+
+# (Layer for Normalization)  ##################################################################################################
+class FeatureWiseEmbeddingNorm(nn.Module):
+    def __init__(self, normalized_shape, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        self.gamma = nn.Parameter(torch.ones(normalized_shape, 1))
+        self.beta = nn.Parameter(torch.zeros(normalized_shape, 1))
+    
+    def forward(self, x):
+        """
+        x: (batch, feature, embedding_dim)
+        feature별로 embedding_dim 축에 대해 normalization
+        """
+        mean = x.mean(dim=-1, keepdim=True)  # (B, F, 1)
+        var = x.var(dim=-1, keepdim=True)    # (B, F, 1)
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        return self.gamma * x_norm + self.beta
+
+ ####################################################################################################################################
 
 
 
@@ -448,9 +483,9 @@ class ScaledDotProductAttention(nn.Module):
 
 
 
-class MultiHeadAttentionLayer(nn.Module):
+class MultiheadAttention(nn.Module):
     """
-    MultiHeadAttentionLayer
+    MultiHeadAttention
     -----------------------
     입력 시퀀스(또는 feature 집합)에서 **여러 개의 '관점(head)'로 병렬 어텐션을 수행**하여,
     각 토큰/feature가 어떤 다른 위치에 주목해야 하는지 학습적으로 판단하고, 그 결과를 집계해 내보내는 모듈.
@@ -489,7 +524,7 @@ class MultiHeadAttentionLayer(nn.Module):
         - 메모리/연산 복잡도: O(B * H * T_q * T_k).
 
     Example:
-        >>> mha = MultiHeadAttentionLayer(embed_dim=256, num_heads=8, batch_first=True)
+        >>> mha = MultiHeadAttention(embed_dim=256, num_heads=8, batch_first=True)
         >>> x = torch.randn(2, 16, 256)  # (B, T, E)
         >>> y, attn = mha(x, x, x, need_weights=True)  # self-attention
         >>> y.shape, attn.shape
@@ -506,30 +541,37 @@ class MultiHeadAttentionLayer(nn.Module):
             vdim=None,
             batch_first=False,
             device=None,
-            dtype=None
+            dtype=None,
+            qkv_projection = True,
+            ind_qkv_projection=False,
+            feature_dim = None
         ):
         """
         Args:
-        embed_dim (int):
-            입력/출력의 임베딩 차원. 전체 모델 차원.
-        num_heads (int):
-            멀티헤드 개수. `embed_dim % num_heads == 0` 이어야 하며, head_dim = embed_dim // num_heads.
-        dropout (float, default=0.0):
-            어텐션 가중치에 적용할 드롭아웃 비율(regularization).
-        bias (bool, default=True):
-            Q/K/V 및 out projection에 bias를 둘지 여부.
-        add_bias_kv (bool, default=False):
-            학습 가능한 bias 키/값 벡터를 K/V에 추가하여, 전역(anchor) 참조점을 제공.
-        add_zero_attn (bool, default=False):
-            0 벡터를 K/V의 마지막에 추가하여, 필요 시 "정보 없음" 선택지를 제공.
-        kdim (int | None, default=None):
-            K의 입력 차원(선형사상 전). None이면 embed_dim을 사용.
-        vdim (int | None, default=None):
-            V의 입력 차원(선형사상 전). None이면 embed_dim을 사용.
-        batch_first (bool, default=False):
-            입력이 (B, T, E)인지 (T, B, E)인지 지정. False면 (T, B, E)로 간주.
-        device, dtype:
-            파라미터 초기화 장치/자료형.
+            embed_dim (int):
+                입력/출력의 임베딩 차원. 전체 모델 차원.
+            num_heads (int):
+                멀티헤드 개수. `embed_dim % num_heads == 0` 이어야 하며, head_dim = embed_dim // num_heads.
+            dropout (float, default=0.0):
+                어텐션 가중치에 적용할 드롭아웃 비율(regularization).
+            bias (bool, default=True):
+                Q/K/V 및 out projection에 bias를 둘지 여부.
+            add_bias_kv (bool, default=False):
+                학습 가능한 bias 키/값 벡터를 K/V에 추가하여, 전역(anchor) 참조점을 제공.
+            add_zero_attn (bool, default=False):
+                0 벡터를 K/V의 마지막에 추가하여, 필요 시 "정보 없음" 선택지를 제공.
+            kdim (int | None, default=None):
+                K의 입력 차원(선형사상 전). None이면 embed_dim을 사용.
+            vdim (int | None, default=None):
+                V의 입력 차원(선형사상 전). None이면 embed_dim을 사용.
+            batch_first (bool, default=False):
+                입력이 (B, T, E)인지 (T, B, E)인지 지정. False면 (T, B, E)로 간주.
+            device, dtype:
+                파라미터 초기화 장치/자료형.
+            qkv_projection (bool, default=True):
+                True면 입력 query/key/value를 각각 학습 가능한 선형 변환으로 Q, K, V를 생성합니다.
+                False면 입력을 그대로 Q, K, V로 사용하며, 외부에서 이미 계산된 Q/K/V를 전달하는 경우에 적합합니다.
+
         """
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
@@ -546,18 +588,28 @@ class MultiHeadAttentionLayer(nn.Module):
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
 
-        self.q_proj_weight = nn.Parameter(torch.empty(embed_dim, embed_dim, **factory_kwargs))
-        self.k_proj_weight = nn.Parameter(torch.empty(embed_dim, self.kdim, **factory_kwargs))
-        self.v_proj_weight = nn.Parameter(torch.empty(embed_dim, self.vdim, **factory_kwargs))
+        self.qkv_projection = qkv_projection
+        self.ind_qkv_projection = ind_qkv_projection
+        
+        if self.qkv_projection:
+            if self.ind_qkv_projection:
+                self.q_embed_linear = EmbeddingLinear(feature_dim, embed_dim, embed_dim, bias=bias)
+                self.k_embed_linear = EmbeddingLinear(feature_dim, embed_dim, embed_dim, bias=bias)
+                self.v_embed_linear = EmbeddingLinear(feature_dim, embed_dim, embed_dim, bias=bias)
+                
+            else:
+                self.q_proj_weight = nn.Parameter(torch.empty(embed_dim, embed_dim, **factory_kwargs))
+                self.k_proj_weight = nn.Parameter(torch.empty(embed_dim, self.kdim, **factory_kwargs))
+                self.v_proj_weight = nn.Parameter(torch.empty(embed_dim, self.vdim, **factory_kwargs))
 
-        if bias:
-            self.in_proj_bias_q = nn.Parameter(torch.empty(embed_dim, **factory_kwargs))
-            self.in_proj_bias_k = nn.Parameter(torch.empty(embed_dim, **factory_kwargs))
-            self.in_proj_bias_v = nn.Parameter(torch.empty(embed_dim, **factory_kwargs))
-        else:
-            self.register_parameter('in_proj_bias_q', None)
-            self.register_parameter('in_proj_bias_k', None)
-            self.register_parameter('in_proj_bias_v', None)
+                if bias:
+                    self.in_proj_bias_q = nn.Parameter(torch.empty(embed_dim, **factory_kwargs))
+                    self.in_proj_bias_k = nn.Parameter(torch.empty(embed_dim, **factory_kwargs))
+                    self.in_proj_bias_v = nn.Parameter(torch.empty(embed_dim, **factory_kwargs))
+                else:
+                    self.register_parameter('in_proj_bias_q', None)
+                    self.register_parameter('in_proj_bias_k', None)
+                    self.register_parameter('in_proj_bias_v', None)
 
         if add_bias_kv:
             self.bias_k = nn.Parameter(torch.empty(1, 1, embed_dim, **factory_kwargs))
@@ -574,14 +626,15 @@ class MultiHeadAttentionLayer(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self):
-        nn.init.xavier_uniform_(self.q_proj_weight)
-        nn.init.xavier_uniform_(self.k_proj_weight)
-        nn.init.xavier_uniform_(self.v_proj_weight)
+        if self.qkv_projection and (self.ind_qkv_projection is False):
+            nn.init.xavier_uniform_(self.q_proj_weight)
+            nn.init.xavier_uniform_(self.k_proj_weight)
+            nn.init.xavier_uniform_(self.v_proj_weight)
 
-        if self.in_proj_bias_q is not None:
-            nn.init.constant_(self.in_proj_bias_q, 0.)
-            nn.init.constant_(self.in_proj_bias_k, 0.)
-            nn.init.constant_(self.in_proj_bias_v, 0.)
+            if self.in_proj_bias_q is not None:
+                nn.init.constant_(self.in_proj_bias_q, 0.)
+                nn.init.constant_(self.in_proj_bias_k, 0.)
+                nn.init.constant_(self.in_proj_bias_v, 0.)
 
         if self.bias_k is not None:
             nn.init.xavier_normal_(self.bias_k)
@@ -599,45 +652,54 @@ class MultiHeadAttentionLayer(nn.Module):
             key_padding_mask: Optional[torch.Tensor] = None,
             need_weights: bool = True,
             attn_mask: Optional[torch.Tensor] = None,
-            average_attn_weights: bool = True
+            average_attn_weights: bool = True,
+            is_causal: bool = False
         ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
-        Args:
-            query, key, value (torch.Tensor):
-                - batch_first=True  → (B, T_*, E_*)
-                - batch_first=False → (T_*, B, E_*)
-                주의: key/value의 마지막 차원은 kdim/vdim에 따라 달라질 수 있으나,
-                     내부 선형사상 후에는 embed_dim으로 정규화됩니다.
+            Args:
+                query, key, value (torch.Tensor):
+                    - batch_first=True  → (B, T_*, E_*)
+                    - batch_first=False → (T_*, B, E_*)
+                    주의: key/value의 마지막 차원은 kdim/vdim에 따라 달라질 수 있으나,
+                        내부 선형사상 후에는 embed_dim으로 정규화됩니다.
 
-            key_padding_mask (torch.Tensor | None):
-                패딩 위치를 가릴 마스크. True/1 위치가 **가려짐**.
-                shape 예: (B, T_k) 또는 broadcast 가능 형태.
-                내부에서 (B_total, 1, 1, T_k)로 변형되어 attention score에 반영.
+                key_padding_mask (torch.Tensor | None):
+                    패딩 위치를 가릴 마스크. True/1 위치가 **가려짐**.
+                    shape 예: (B, T_k) 또는 broadcast 가능 형태.
+                    내부에서 (B_total, 1, 1, T_k)로 변형되어 attention score에 반영.
 
-            attn_mask (torch.Tensor | None):
-                causal/제한 마스크(상삼각 등). True/1 위치가 **가려짐**.
-                shape 예: (1, 1, T_q, T_k) 또는 (B, H, T_q, T_k).
-                key_padding_mask와 OR로 결합.
+                attn_mask (torch.Tensor | None):
+                    causal/제한 마스크(상삼각 등). True/1 위치가 **가려짐**.
+                    shape 예: (1, 1, T_q, T_k) 또는 (B, H, T_q, T_k).
+                    key_padding_mask와 OR로 결합.
 
-            need_weights (bool, default=True):
-                어텐션 확률(가중치) 반환 여부.
+                need_weights (bool, default=True):
+                    어텐션 확률(가중치) 반환 여부.
 
-            average_attn_weights (bool, default=True):
-                True면 Head 평균을 반환 → shape (B, T_q, T_k)
-                False면 Head별 가중치 유지 → shape (B, H, T_q, T_k)
+                average_attn_weights (bool, default=True):
+                    True면 Head 평균을 반환 → shape (B, T_q, T_k)
+                    False면 Head별 가중치 유지 → shape (B, H, T_q, T_k)
+                    
+                is_causal (bool, default=False):
+                    True로 설정하면 **자동으로 causal mask(미래 토큰 차단)**를 생성하여 적용합니다.
+                    causal mask는 현재 시점 이후의 모든 토큰을 보지 못하게 하는 상삼각 형태의 마스크이며,
+                    주로 **Decoder** 또는 **GPT 계열 모델**에서 사용됩니다.
+                    이 옵션을 활성화하면, `attn_mask`에 별도로 causal mask를 전달하지 않아도
+                    내부에서 `(T_q, T_k)` 크기의 상삼각 마스크를 생성하여 attention score에 반영합니다.
+                    key_padding_mask 및 attn_mask와 OR 연산으로 결합됩니다.
 
-        Returns:
-            output (torch.Tensor):
-                query 포맷과 동일한 배치 포맷의 어텐션 결과.
-            attn_weights (torch.Tensor | None):
-                need_weights=True일 때 반환. 위 설명에 따른 shape.
+            Returns:
+                output (torch.Tensor):
+                    query 포맷과 동일한 배치 포맷의 어텐션 결과.
+                attn_weights (torch.Tensor | None):
+                    need_weights=True일 때 반환. 위 설명에 따른 shape.
 
-        Notes:
-            - 메모리/연산량은 T_q와 T_k의 곱에 선형 비례.
-            - key_padding_mask/attn_mask는 bool 타입 권장(True=mask-out).
-            - add_bias_kv/add_zero_attn은 "항상 참조 가능한 위치"를 추가해 안정성/표현력 향상에 기여할 수 있음.
+            Notes:
+                - 메모리/연산량은 T_q와 T_k의 곱에 선형 비례.
+                - key_padding_mask/attn_mask는 bool 타입 권장(True=mask-out).
+                - add_bias_kv/add_zero_attn은 "항상 참조 가능한 위치"를 추가해 안정성/표현력 향상에 기여할 수 있음.
         """
-        
+
         if not self.batch_first:
             query = query.transpose(0, -3)
             key = key.transpose(0, -3)
@@ -651,24 +713,30 @@ class MultiHeadAttentionLayer(nn.Module):
         query = query.reshape(B_total, T_q, self.embed_dim)
         key = key.reshape(B_total, T_k, self.kdim)
         value = value.reshape(B_total, T_k, self.vdim)
-
-        q = F.linear(query, self.q_proj_weight, self.in_proj_bias_q)
-        k = F.linear(key, self.k_proj_weight, self.in_proj_bias_k)
-        v = F.linear(value, self.v_proj_weight, self.in_proj_bias_v)
+        
+        if self.qkv_projection:
+            if self.ind_qkv_projection:
+                query = self.q_embed_linear(query)
+                key = self.k_embed_linear(key)
+                value = self.v_embed_linear(query)
+            else:
+                query = F.linear(query, self.q_proj_weight, self.in_proj_bias_q)
+                key = F.linear(key, self.k_proj_weight, self.in_proj_bias_k)
+                value = F.linear(value, self.v_proj_weight, self.in_proj_bias_v)
 
         if self.bias_k is not None and self.bias_v is not None:
-            k = torch.cat([k, self.bias_k.expand(B_total, -1, -1)], dim=1)
-            v = torch.cat([v, self.bias_v.expand(B_total, -1, -1)], dim=1)
-            T_k = k.size(1)
+            key = torch.cat([key, self.bias_k.expand(B_total, -1, -1)], dim=1)
+            value = torch.cat([value, self.bias_v.expand(B_total, -1, -1)], dim=1)
+            T_k = key.size(1)
 
         if self.add_zero_attn:
-            k = torch.cat([k, torch.zeros(B_total, 1, self.embed_dim, device=k.device, dtype=k.dtype)], dim=1)
-            v = torch.cat([v, torch.zeros(B_total, 1, self.embed_dim, device=v.device, dtype=v.dtype)], dim=1)
-            T_k = k.size(1)
+            key = torch.cat([key, torch.zeros(B_total, 1, self.embed_dim, device=key.device, dtype=key.dtype)], dim=1)
+            value = torch.cat([value, torch.zeros(B_total, 1, self.embed_dim, device=value.device, dtype=value.dtype)], dim=1)
+            T_k = key.size(1)
 
-        q = q.view(B_total, T_q, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B_total, T_k, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B_total, T_k, self.num_heads, self.head_dim).transpose(1, 2)
+        query = query.view(B_total, T_q, self.num_heads, self.head_dim).transpose(1, 2)
+        key = key.view(B_total, T_k, self.num_heads, self.head_dim).transpose(1, 2)
+        value = value.view(B_total, T_k, self.num_heads, self.head_dim).transpose(1, 2)
 
         # key_padding_mask 적용
         if key_padding_mask is not None:
@@ -683,9 +751,18 @@ class MultiHeadAttentionLayer(nn.Module):
                 attn_mask_combined = attn_mask
             else:
                 attn_mask_combined = attn_mask_combined | attn_mask
+        
+        if is_causal:
+            # is_causal 적용
+            causal_mask = torch.triu(torch.ones(T_q, T_k, dtype=torch.bool, device=query.device), diagonal=1)
+            causal_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T_q, T_k)
+            if attn_mask_combined is None:
+                attn_mask_combined = causal_mask
+            else:
+                attn_mask_combined = attn_mask_combined | causal_mask
 
         # Scaled Dot-Product Attention 호출
-        attn_output, attn_weights = self.attn(q, k, v, attn_mask=attn_mask_combined)
+        attn_output, attn_weights = self.attn(query, key, value, attn_mask=attn_mask_combined)
 
         attn_output = attn_output.transpose(1, 2).contiguous().view(B_total, T_q, self.embed_dim)
         output = self.out_proj(attn_output)
@@ -702,7 +779,6 @@ class MultiHeadAttentionLayer(nn.Module):
             return output, attn_weights
         else:
             return output, None
-
 
 # a = torch.rand(10,5,3,4)
 
@@ -825,6 +901,46 @@ class PreLN_TransformerEncoderLayer(nn.Module):
         return src
 
 
+
+
+class FeatureWiseTransformerEncoder(nn.Module):
+    def __init__(self, d_model, nhead, feature_dim, dim_feedforward=2048, dropout=0.1, 
+                batch_first=True, qkv_projection=True, ind_qkv_projection=True):
+        super().__init__()
+        
+        self.layer_norm1 = nn.LayerNorm(d_model)      # layer_norm1
+        self.self_attn = MultiheadAttention(d_model, nhead, batch_first=True, 
+                                    qkv_projection=qkv_projection, ind_qkv_projection=True, feature_dim=feature_dim)
+        self.dropout1 = nn.Dropout(dropout)
+        
+        self.ff_layer = nn.Sequential(
+            nn.LayerNorm(d_model),      # layer_norm2
+            EmbeddingLinear(feature_dim, d_model, dim_feedforward),     # FF_linear1
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            EmbeddingLinear(feature_dim, dim_feedforward, d_model),     # FF_linear2
+        )
+        self.dropout2 = nn.Dropout(dropout)
+    
+    def forward(self,
+        src: torch.Tensor,
+        src_mask: Optional[torch.Tensor] = None,
+        is_causal: bool = False,
+        src_key_padding_mask: Optional[torch.Tensor] = None
+        ):
+        
+        # Pre-LN before MHA
+        src_norm = self.layer_norm1(src)
+        attn_output, _ = self.self_attn(src_norm, src_norm, src_norm,
+                                        attn_mask=src_mask,
+                                        key_padding_mask=src_key_padding_mask,
+                                        is_causal=is_causal)    # is_causal : 미래정보차단여부 (src_mask를 안넣어도 자동으로 차단해줌)
+        src = src + self.dropout1(attn_output)
+
+        # Pre-LN before FFN
+        src = src + self.ff_layer(src)
+        return src
+
 ####################################################################################################################################
 
 
@@ -836,7 +952,7 @@ class PreLN_TransformerEncoderLayer(nn.Module):
 
 # (Layer of AttentionPooling) ###################################################################################################################################
 
-class AttentionPoolingLayer(nn.Module):
+class AttentionPooling(nn.Module):
     """
     AttentionPoolingLayer
     ---------------------
