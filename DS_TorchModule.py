@@ -33,17 +33,36 @@ def make_tril_mask(x, pad_idx=0):
 
 
 # (Layer for Embedding)  ##################################################################################################
+
+# class CategoricalEmbedding(nn.Module):
+#     def __init__(self, n_features, num_embeddings, embedding_dim):
+#         super().__init__()
+#         self.embedding_weights = nn.Parameter(torch.randn((n_features, num_embeddings, embedding_dim)))
+    
+#     def forward(self, x):
+#         x_shape = x.shape
+#         n_features = x_shape[-1]
+        
+#         feature_idx = torch.arange(n_features).view(*([1] * (x.ndim - 1)), n_features).expand(*x_shape)
+#         return self.embedding_weights[feature_idx, x]
+
 class CategoricalEmbedding(nn.Module):
     def __init__(self, n_features, num_embeddings, embedding_dim):
         super().__init__()
-        self.embedding_weights = nn.Parameter(torch.randn((n_features, num_embeddings, embedding_dim)))
-    
+        self.nf, self.ne, self.ed = n_features, num_embeddings, embedding_dim
+        self.embedding = nn.Embedding(n_features * num_embeddings, embedding_dim)
+
     def forward(self, x):
-        x_shape = x.shape
-        n_features = x_shape[-1]
-        
-        feature_idx = torch.arange(n_features).view(*([1] * (x.ndim - 1)), n_features).expand(*x_shape)
-        return self.embedding_weights[feature_idx, x]
+        # x: (..., n_features), long
+        *batch, F = x.shape
+        device = x.device
+        feature_idx = torch.arange(F, device=device).view(*([1]*len(batch)), F).expand(*x.shape)
+        flat_idx = feature_idx * self.ne + x                        # (..., F)
+        out = self.embedding(flat_idx)                                      # (..., F, ed)
+        return out
+
+
+
 
 
 # Feature 마다 독립적으로 Embedding을 부여 : input feature → feature × embedding으로 linear하게 mapping
@@ -373,6 +392,18 @@ class LearnablePositionalEncoding(nn.Module):
 
 
 
+
+
+# (Layer for ResidualConnection)  ##################################################################################################
+class ResidualConnection(nn.Module):
+    def __init__(self, block, shortcut=None):
+        super().__init__()
+        self.block = block
+        self.shortcut = shortcut or (lambda x: x)
+    
+    def forward(self, x):
+        return self.block(x) + self.shortcut(x)
+ ####################################################################################################################################
 
 
 
