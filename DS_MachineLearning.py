@@ -27,7 +27,7 @@ import functools
 import numpy as np
 import pandas as pd
 import torch
-import tensorflow as tf
+# import tensorflow as tf
 
 
 
@@ -545,496 +545,977 @@ class ScalerEncoder:
 
 
 
+################################################################################################
+from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
 
-
-
-
-
-
-
-
-class DataSet():
-    """
-    【required (Library)】copy, functools, numpy(np), pandas(pd), torch, tensorflow(tf)
+# Customizing LabelEncoder
+class LabelEncoder2D:
+    def __init__(self, nan_value=-1, unseen_as_nan=False):
+        self.encoder = {}
+        self.feature_names = None
+        self.nan_replacements = {}
+        self.original_dtypes = {}
+        self.nan_value = nan_value
+        self.unseen_as_nan = unseen_as_nan
     
-    < Attribute >
-      self.inputdata_info
-      self.dataloader_info
-      self.dataloader
-      
-    < Method >
-      . self.Dataset
-      . self.Split
-      . self.Encoding (self.Decoding)
-      . self.Batch
-      . self.Reset_dataloader
-      
-    < Funtion >
-      . self.make_data_info
-      . self.dataloader_to_info
-      . self.info_to_dataloader
-      . self.data_transform_from_numpy
-      . self.split_size
-      . self.data_slicing
-      . self.data_split
-      . self.data_transform
-      . self.make_batch
-      
-    
-    """
-    def __init__(self, X=None, y=None,  X_columns=None, y_columns=None, kwargs_columns={},
-                type = ['pandas', 'numpy', 'tensorflow', 'torch'], set_type={},
-                X_encoder=None, y_encoder=None, encoder={},
-                shuffle=False, random_state=None, **kwargs):
-        
-        # all input value save
-        local_values = locals().copy()
-        
-        dataloader_info = {}
-        # dataloader = {}
-        self.data_columns_couple = {None: None, 'X':X_columns, 'y': y_columns}
-        
-        for arg_name, arg_value in local_values.items():
-            if arg_name not in ['self', 'random_state', 'kwargs']:
-                exec(f"self.{arg_name} = arg_value")
-                
-                if arg_name in ['X', 'y']:
-                    if arg_value is not None and arg_value.shape[0] > 0:
-                        dataloader_info[arg_name] = {}
-                        dataloader_info[arg_name]['data'] = self.make_data_info(arg_value, prefix=arg_name, columns=self.data_columns_couple[arg_name], return_data=True) if arg_value is not None else None
-                    
-        for kwarg_name, kwarg_value in kwargs.items():
-            if kwarg_value is not None and kwarg_value.shape[0] > 0:
-                kwargs_column = kwargs_columns[kwarg_name] if kwarg_name in kwargs_columns.keys() else None
-                dataloader_info[kwarg_name] = {}
-                dataloader_info[kwarg_name]['data'] = self.make_data_info(kwarg_value, prefix=kwarg_name, columns=kwargs_column, return_data=True) if kwarg_value is not None else None
-        
-        # self.local_values = local_values
-        self.set_type = set_type
-        # self.inputdata_info = dataloader_info
-        
-        initialize_object = self.info_to_dataloader(dataloader_info, set_type=set_type)
-        self.dataloader = initialize_object['dataloader']
-        self.dataloader_info = initialize_object['data_info']
-        self.inputdata_info = copy.deepcopy(self.dataloader_info)
-                
-        self.random_state = random_state
-        self.define_random_generate(random_state)
-        self.indices = {}
-        self.length = {}
-        
-        self.dataloader_process = ''
-
-    # [funcation] ---------------------------
-    def define_random_generate(self, random_state=None):
-        self.random_generate = np.random.RandomState(self.random_state) if random_state is None else np.random.RandomState(random_state)
-        # self.random_generate = np.random.default_rng(random_state)
-
-    def make_data_info(self, data, prefix=None, columns=None, iloc_index=None, loc_index=None, dtype=None, return_data=False):
-        prefix = 'v' if prefix is None else prefix
-        type_of_data = str(type(data))
-        
-        array_data = np.array(data)
-        shape = array_data.shape
-        n_dim = len(shape)
-        
-        # type
-        result_of_type = None
-        if 'pandas' in type_of_data:
-            result_of_type = 'pandas'
-        elif 'numpy' in type_of_data:
-            result_of_type = 'numpy'
-        elif 'tensorflow' in type_of_data:
-            result_of_type = 'tensorflow'
-            # result_of_type =  'tensorflow - variable' if 'variable' in type_of_data.lower() else 'tensorflow - constant'      
-        elif 'torch' in type_of_data:
-            result_of_type = 'torch'
+    def fit(self, X):
+        if isinstance(X, pd.DataFrame):
+            self.feature_names = list(X.columns)
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            self.feature_names = list([f"x_cat_{i+1}" for i in range(X.shape[1])])
+            data = pd.DataFrame(X, columns=self.feature_names)
         else:
-            result_of_type = 'else'
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
         
-        # dtype
-        if dtype is None:
-            if  result_of_type == 'pandas':
-                dtype = data.dtype if n_dim == 1 else data.dtypes.to_dict()
-            else:
-                dtype = data.dtype
+        for col in self.feature_names:
+            col_data = data[col]
+            self.original_dtypes[col] = col_data.dtype
             
+            # object dtype이지만 내부 값이 전부 숫자면 숫자로 처리
+            if col_data.dtype == object:
+                try:
+                    col_data = pd.to_numeric(col_data)
+                except ValueError:
+                    pass
             
-        # columns
-        if columns is not None:
-            set_columns = columns
-        elif result_of_type == 'pandas':
-            set_columns = str(data.name) if n_dim == 1 else np.array(data.columns)
-        else:
-            if n_dim == 1:
-                set_columns = prefix
-            elif n_dim > 1:
-                col_base = np.array(range(shape[-1])).astype('str')
-                set_columns = np.tile(col_base, np.array(shape[:-2]).prod()).reshape(*list(shape[:-2]), shape[-1]).astype('str')
-                set_columns = np.char.add(prefix, set_columns)
-                
-        # index
-        if iloc_index is None and loc_index is None:
-            if result_of_type == 'pandas':
-                loc_index = np.array(data.index)
-                iloc_index = np.array(range(shape[0]))
-            else:
-                loc_index = np.array(range(shape[0]))
-                iloc_index = np.array(range(shape[0]))
-        else:
-            if result_of_type == 'pandas':
-                loc_index = np.array(data.index) if loc_index is None else np.array(loc_index)
-                iloc_index = (np.array(range(shape[0])) if loc_index is None else loc_index) if iloc_index is None else np.array(iloc_index)
-            else:
-                loc_index = (np.array(range(shape[0])) if iloc_index is None else iloc_index) if loc_index is None else np.array(loc_index)
-                iloc_index = (np.array(range(shape[0])) if loc_index is None else loc_index) if iloc_index is None else np.array(iloc_index)
-        
-        if return_data:
-            return {'type': result_of_type, 'ndim': n_dim, 'dtype': dtype, 'columns': set_columns, 'loc_index' :loc_index, 'iloc_index':iloc_index, 'data': array_data}
-        else:
-            return {'type': result_of_type, 'ndim': n_dim, 'dtype': dtype, 'columns': set_columns, 'loc_index' :loc_index, 'iloc_index':iloc_index}
-
-    def dataloader_to_info(self, dataloader, data_info=None, update_loader=False):
-        return_data_info = {}
-        for name, dataset in dataloader.items():
-            return_data_info[name] = {}
-            for dataset_name, data in dataset.items():
-                if data_info is None:
-                    return_data_info[name][dataset_name] = self.make_data_info(data=data)
-                else:
-                    info = data_info[name][dataset_name]
-                    return_data_info[name][dataset_name] = self.make_data_info(data=data, columns=info['columns'], iloc_index=info['iloc_index'], loc_index=info['loc_index'], return_data=True)
-        if update_loader is True:
-            return_dataloader = self.info_to_dataloader(return_data_info, update_info=False)
-            return {'dataloader': return_dataloader['dataloader'], 'data_info':return_data_info}
-        else:
-            return {'dataloader': dataloader, 'data_info':return_data_info}
-
-    def info_to_dataloader(self, data_info, set_type={}, update_info=False):
-        return_dataloader = {}
-        self.set_type.update(set_type)
-        
-        for name, dataset in data_info.items():
-            return_dataloader[name] = {}
-            for dataset_name, info in dataset.items():
-                if self.set_type is None:
-                    apply_type = info['type']
-                elif type(self.set_type) == str:
-                    apply_type = self.set_type
-                elif type(self.set_type) == dict:
-                    apply_type = self.set_type[name] if name in self.set_type.keys() else info['type']
-                return_dataloader[name][dataset_name] = self.data_transform_from_numpy(numpy_data=info['data'], set_type=apply_type,
-                                                        index=info['loc_index'], columns=info['columns'], dtype=info['dtype'])
-        if len(self.set_type) > 0 or update_info is True:
-            return_data_info = self.dataloader_to_info(return_dataloader, data_info=data_info, update_loader=False)
-            return {'dataloader': return_dataloader, 'data_info':return_data_info['data_info']}
-        else:
-            return {'dataloader':return_dataloader, 'data_info':data_info}
-
-    def data_transform_from_numpy(self, numpy_data, set_type, index=None, columns=None, dtype=None):
-        shape = numpy_data.shape
-        ndim = len(shape)
-        
-        # dtype
-        if dtype is not None:
-            if type(dtype) == dict:     # pandas
-                if set_type == 'pandas':
-                    apply_dtype = dtype
-                else:
-                    apply_dtype = np.dtype('float32')
-            elif 'torch' in str(dtype):     # torch
-                apply_dtype = np.dtype(str(dtype).split('.')[-1])
-            elif '<dtype:' in str(dtype):   # tensorflow
-                apply_dtype = np.dtype(dtype.as_numpy_dtype)
-            else:
-                apply_dtype = dtype
-        else:
-            apply_dtype = dtype
-                
-        # set_type transform
-        if set_type == 'numpy':
-            return numpy_data
-        elif set_type == 'pandas':
-            if ndim == 1:
-                return pd.Series(numpy_data, index=index, name=columns, dtype=apply_dtype)
-            elif ndim == 2:
-                if apply_dtype is None:
-                    return pd.DataFrame(numpy_data, index=index, columns=columns)
-                else:
-                    if type(apply_dtype) != dict:
-                        if columns is None:
-                            apply_dtype = {c: apply_dtype for c in range(numpy_data.shape[1])}
-                        else:
-                            apply_dtype = {c: apply_dtype for c in columns}
-                    return pd.DataFrame(numpy_data, index=index, columns=columns).astype(apply_dtype)
-        elif set_type == 'tensorflow':
-            return tf.constant(numpy_data, dtype=apply_dtype)
-        elif set_type == 'torch':
-            return torch.FloatTensor(numpy_data)
-            # return torch.tensor(numpy_data, dtype=eval(f'torch.{str(apply_dtype)}'))
-
-    def split_size(self, valid_size, test_size):
-        self.valid_size = valid_size
-        self.test_size = test_size
-        
-        self.train_size = 1 - test_size
-        self.train_train_size = self.train_size - valid_size
-        self.train_valid_size = valid_size
-
-    def generate_index(self, data, data_info=None, valid_size=None, test_size=None, shuffle=True,
-                      random_state=None):
-        try:
-            data_length = len(data)
-        except:
-            data_length = data.shape[0]
-        if data_info is None:
-            data_info = self.make_data_info(data=data)
+            le = LabelEncoder()
             
-        index = data_info['iloc_index']
-        indices = {}
-
-        # shuffle
-        if shuffle is True:
-            random_generate = self.random_generate if random_state is None else np.random.RandomState(random_state)
-            apply_index = random_generate.permutation(index)
-        else:
-            apply_index = index
-        
-        # split_size
-        self.split_size(valid_size = 0.0 if valid_size is None else valid_size,
-                        test_size = 0.3 if test_size is None else test_size)
-        
-        # train_valid_test split
-        train_len = int(data_length * (1-self.test_size))
-        train_train_len = int(train_len * (1-self.train_valid_size))
-        train_valid_len = train_len - train_train_len
-        test_len = data_length - train_len
-        
-        for k, v in zip(['data','train', 'train_train', 'train_valid', 'test'], [train_len, train_train_len, train_valid_len, test_len]):
-            if v > 0:
-                self.length[k] = v
-        
-        # save
-        indices['all_index'] = index
-        indices['apply_index'] = apply_index
-        indices['train_index'] = apply_index[:train_len]
-        indices['train_train_index'] = indices['train_index'][:train_train_len]
-        if train_valid_len > 0:
-            indices['train_valid_index'] = indices['train_index'][train_train_len:]
-        indices['test_index'] = apply_index[train_len:]
-        
-        return indices
-
-    def data_slicing(self, data=None, apply_index=None, data_info=None, index_type='iloc'):
-        # data_info
-        if data_info is None:
-            data_info = self.make_data_info(data=data, return_data=True)
-
-        numpy_data = data_info['data']
-        
-        if index_type == 'iloc':
-            index_series = pd.Series(data_info['loc_index'], index=range(len(numpy_data)) )
-            iloc_index = np.array(index_series[apply_index].index) 
-            loc_index = np.array(index_series[apply_index].values)
-        elif index_type == 'loc':
-            index_series = pd.Series(range(len(numpy_data)), index=data_info['loc_index'])
-            iloc_index = np.array(index_series[apply_index].values) 
-            loc_index = np.array(index_series[apply_index].index)
-        
-        # slicing
-        sliced_data = np.take(numpy_data, iloc_index, axis=0)
-        # sliced_index = np.take(data_index, apply_index, axis=0)
-        return self.data_transform_from_numpy(numpy_data=sliced_data, index=loc_index, 
-                                            set_type=data_info['type'], columns=data_info['columns'], dtype=data_info['dtype'])       
-
-    def data_split(self, data, data_info=None, indices=None, valid_size=0, test_size=0, shuffle=True,
-                   index_type='iloc', random_state=None, verbose=0):
-        # data_info
-        if data_info is None:
-            data_info = self.make_data_info(data=data, return_data=True)
-            
-        if indices is None:
-            if len(self.indices) == 0:
-                indices = self.generate_index(data=data, valid_size=valid_size, test_size=test_size, 
-                                              shuffle=shuffle, random_state=random_state)
+            if np.issubdtype(col_data.dtype, np.floating):
+                replacement = self.nan_value
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement).astype(np.int64)
+            elif np.issubdtype(col_data.dtype, np.integer):
+                replacement = self.nan_value
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement)
+            elif col_data.dtype == object:
+                replacement = '__missing__'
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement)
             else:
-                indices = self.indices
-        
-        split_data = {}
-        for key, index in indices.items():
-            split_data[key] = self.data_slicing(data=data, apply_index=index, data_info=data_info, index_type=index_type)
-            if verbose > 0:
-                print(f"{key}: {split_data[key].shape}")
+                raise ValueError(f"Unsupported dtype for column {col}: {col_data.dtype}")
             
-        return {'split_data': split_data, 'indices':indices}
-
-    def data_transform(self, data, data_info=None, encoder=None, type='encoding'):
-        if encoder is None:
-            return data
-        else:
-            try:
-                if 'enco' in type:
-                    return encoder.transform(data)
-                elif 'deco' in type:
-                    return encoder.inverse_transform(data)
-            except:
-                # data_info
-                if data_info is None:
-                    data_info = self.make_data_info(data=data, return_data=True)
-                if 'enco' in type:
-                    transformed_np_data = encoder.transform(data_info['data'])
-                elif 'deco' in type:
-                    transformed_np_data = encoder.inverse_transform(data_info['data'])
-                transformed_data = self.data_transform_from_numpy(numpy_data=transformed_np_data, 
-                                               set_type=data_info['type'], columns=data_info['columns'], dtype=None)
-                return transformed_data
-
-    def make_batch(self, data, batch_size=None):
-        try:
-            data_length = len(data)
-        except:
-            data_length = data.shape[0]
+            le.fit(col_data)
+            self.encoder[col] = le
         
-        batch_size = data_length if batch_size is None or batch_size <= 0 or batch_size > data_length else batch_size
-        batch_index = 0
-        batch = []
-        while True:
-            if batch_index + batch_size >= data_length:
-                batch.append(data[batch_index:])
-                batch_index = data_length
-                # batch = np.array(batch)
-                break
-            else:
-                batch.append(data[batch_index:batch_index + batch_size])
-                batch_index = batch_index + batch_size
-        return batch
-
-    # [method] ---------------------------
-    def Reset_dataloader(self):
-        self.dataloader_info = copy.deepcopy(self.inputdata_info)
-        self.dataloader = self.info_to_dataloader(self.dataloader_info)['dataloader']
-        self.dataloader_process = ''
-
-    def Dataset(self, kwargs_columns={}, set_type={}, **kwargs):
-        for kwarg_name, kwarg_value in kwargs.items():
-            if kwarg_value is not None and kwarg_value.shape[0] > 0:
-                kwargs_column = kwargs_columns[kwarg_name] if kwarg_name in kwargs_columns.keys() else None
-                self.dataloader_info[kwarg_name] = {}
-                self.dataloader_info[kwarg_name]['data'] = self.make_data_info(kwarg_value, prefix=kwarg_name, columns=kwargs_column, return_data=True) if kwarg_value is not None else None
-                self.inputdata_info[kwarg_name] = {}
-                self.inputdata_info[kwarg_name] = self.dataloader_info[kwarg_name]['data']
-        # set dataset / data_info
-        update_object = self.info_to_dataloader(dataloader_info, set_type=set_type)
-        self.dataloader = self.info_to_dataloader(self.dataloader_info, set_type=set_type)['dataloader']
-        self.dataloader_info = update_object['data_info']
-        self.inputdata_info = copy.deepcopy(self.dataloader_info)
         return self
-
-    def Encoding(self, X_encoder=None, y_encoder=None, encoder={}):
-        # encoder dictionary
-        self.encoder.update(encoder)
-        X_encoder = self.X_encoder if X_encoder is None else X_encoder
-        y_encoder = self.y_encoder if y_encoder is None else y_encoder
-        if X_encoder is not None:
-            encoder['X'] = X_encoder
-        if y_encoder is not None:
-            encoder['y'] = y_encoder
+    
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            data = pd.DataFrame(X, columns=self.feature_names)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
         
-        # encoding
-        encoder_keys = encoder.keys()
-        for name, data_dict in self.dataloader.items():
-            for dataset_name, data in data_dict.items():
-                if name in encoder_keys and encoder[name] is not None:
-                    data_info = self.dataloader_info[name][dataset_name]
-                    encodered_data = self.data_transform(data=data, data_info=data_info, encoder=encoder[name], type='encoding')
-                    self.dataloader[name][dataset_name] = encodered_data
-                    self.dataloader_info[name][dataset_name] = self.make_data_info(data=encodered_data, columns=data_info['columns'], 
-                                                                                    iloc_index= data_info['iloc_index'],
-                                                                                    return_data=True)
-        # __repr__
-        self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + 'Encoding'
-
-    def Decoding(self, X_encoder=None, y_encoder=None, encoder={}):
-        # encoder dictionary
-        self.encoder.update(encoder)
-        X_encoder = self.X_encoder if X_encoder is None else X_encoder
-        y_encoder = self.y_encoder if y_encoder is None else y_encoder
-        if X_encoder is not None:
-            encoder['X'] = X_encoder
-        if y_encoder is not None:
-            encoder['y'] = y_encoder
+        transformed = pd.DataFrame(index=data.index)
         
-        # decoding
-        encoder_keys = encoder.keys()
-        for name, data_dict in self.dataloader.items():
-            for dataset_name, data in data_dict.items():
-                if name in encoder_keys and encoder[name] is not None:
-                    data_info = self.dataloader_info[name][dataset_name]
-                    encodered_data = self.data_transform(data=data, data_info=data_info, encoder=encoder[name], type='decoding')
-                    self.dataloader[name][dataset_name] = encodered_data
-                    self.dataloader_info[name][dataset_name] = self.make_data_info(data=encodered_data, columns=data_info['columns'], 
-                                                                                    iloc_index= data_info['iloc_index'],
-                                                                                    dtype=self.inputdata_info[name]['data']['dtype'],
-                                                                                    return_data=True)
-        # __repr__
-        self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + 'Decoding'
-
-    def Split(self, valid_size=0, test_size=0.3, shuffle=True, random_state=None):
-        random_state = self.random_state if random_state is None else random_state
-        
-        # train_valid_test_split
-        for name, data_dict in self.dataloader.items():
-            data_info = self.dataloader_info[name]['data']
-            splited_dict = self.data_split(data=data_dict['data'], data_info=data_info,
-                            valid_size=valid_size, test_size=test_size, shuffle=shuffle, 
-                            index_type='iloc', random_state=self.random_state)
-            del splited_dict['split_data']['all_index']
-            del splited_dict['split_data']['apply_index']
-            del splited_dict['indices']['all_index']
-            del splited_dict['indices']['apply_index']
+        for col in self.feature_names:
+            col_data = data[col]
             
-            for dataset_name, index in splited_dict['indices'].items():
-                data = splited_dict['split_data'][dataset_name]
-                set_name = dataset_name.replace('index','set')
-                self.dataloader[name][set_name] = data
-                self.dataloader_info[name][set_name] = self.make_data_info(data=data,
-                                                                   columns=data_info['columns'],
-                                                                   iloc_index=index,
-                                                                   loc_index=np.take(data_info['loc_index'], index),
-                                                                   dtype=data_info['dtype'],
-                                                                   return_data=True)
-        # __repr__
-        self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + 'Split'
-
-    def Batch(self, batch_size=None, shuffle=True, random_state=None):
-        if shuffle is True:
-            random_generate = self.random_generate if random_state is None else np.random.RandomState(random_state)
+            if col_data.dtype == object:
+                try:
+                    col_data = pd.to_numeric(col_data)
+                except ValueError:
+                    pass
+            
+            replacement = self.nan_replacements[col]
+            col_data = col_data.fillna(replacement)
+            
+            le = self.encoder[col]
+            known_classes = set(le.classes_)
+            
+            if self.unseen_as_nan:
+                # unseen 값을 NaN 대체값으로 변환
+                col_data = col_data.apply(lambda x: x if x in known_classes else replacement)
+                transformed[col] = le.transform(col_data)
+            else:
+                # unseen 값을 새로운 category로 추가
+                unseen_values = set(col_data) - known_classes
+                if unseen_values:
+                    le.classes_ = np.append(le.classes_, list(unseen_values))
+                transformed[col] = le.transform(col_data)
         
-        # transform to batch
-        for name, data_dict in self.dataloader.items():
-            for dataset_name, data in data_dict.items():
-                batch_data = []
-                data_info = self.dataloader_info[name][dataset_name]
-                dataset_index = data_info['loc_index']
-                if shuffle is True:
-                    dataset_index = random_generate.permutation(dataset_index)
-                batch_indices = self.make_batch(dataset_index, batch_size=batch_size)
-                
-                for batch_index in batch_indices:
-                    batch_sliced_data = self.data_slicing(data, data_info=data_info, apply_index=batch_index, index_type='loc')
-                    batch_data.append( batch_sliced_data )
-                
-                # update dataloader
-                self.dataloader[name][dataset_name] = batch_data
-                
-                # update dataloader_info
-                self.dataloader_info[name][dataset_name]['batch_iloc_index'] = batch_indices
-        # __repr__
-        self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + f'Batch({batch_size})'
+        return np.array(transformed)
+    
+    def inverse_transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        inversed = pd.DataFrame(index=data.index)
+        
+        for col in self.feature_names:
+            le = self.encoder[col]
+            decoded = le.inverse_transform(data[col])
+            replacement = self.nan_replacements[col]
+            
+            decoded = np.where(decoded == replacement, np.nan, decoded)
+            inversed[col] = decoded
+        
+        return inversed
+
+    def get_feature_names_out(self):
+        return np.array(self.feature_names, dtype=object)
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
 
     def __repr__(self):
-        data_set_names = ', '.join(list(self.dataloader.keys()))
-        return f'<class: DataLoader Object ({data_set_names})>{self.dataloader_process}'
+        repr_str = "DS.LabelEncoder2D("
+        if len(self.encoder) > 0:
+            # encoders_str = '\n'.join([f"  {k}: {v}" for k, v in self.encoder.items()])
+            # return repr_str + '\n{\n' + encoders_str + '\n}'
+            repr_str += str(list(self.encoder.keys()))
+        
+        repr_str += ")"
+        return repr_str
+
+# Customizing NoneEncoder
+class NoneEncoder():
+    def __init__(self):
+        self.feature_names = None
+
+    def fit(self, X):
+        if isinstance(X, pd.DataFrame):
+            self.feature_names = list(X.columns)
+        elif isinstance(X, np.ndarray):
+            self.feature_names = list(range(X.shape[1]))
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+    
+    def transform(self, X):
+        return np.array(X)
+    
+    def fit_transform(self, X):
+        self.fit(X)
+        return self.transform(X)
+    
+    def inverse_transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            index = list(X.index)
+        elif isinstance(X, np.ndarray):
+            index = list(range(X.shape[0]))
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        return pd.DataFrame(X, index=index, columns=self.feature_names)
+    
+    def get_feature_names_out(self):
+        return np.array(self.feature_names, dtype=object)
+    
+    def __repr__(self):
+        return "NoneEncoder()"
+
+################################################################################################
+
+
+from sklearn.model_selection import StratifiedKFold, KFold, train_test_split
+from torch.utils.data import TensorDataset, DataLoader
+class DataPreprocessing():
+    def __init__(self, *data_args, split_size=(0.7, 0.1, 0.2), encoder=[], batch_size=1, random_state=None, shuffle=True, stratify=None, **kwargs):
+        self.data_args = data_args
+        assert (np.array(list(map(len, self.data_args)))/len(self.data_args[0])).all() == True, 'Arguments must have same length'
+        # input data to DataFrame
+        self.df_data = tuple([self._to_dataframe(data) for data in data_args])
+        self.split_data = {}
+        self.split_dataframe = pd.DataFrame()
+        self.transformed_data = {}
+        self.tensor_dataset = {}
+        self.tensor_dataloader = {}
+        
+        # index
+        self.full_index = np.arange(len(self.data_args[0]))
+        
+        # encoder
+        if len(encoder) == 0:
+            self.encoder = [NoneEncoder() for _ in range(len(self.data_args))]
+        else:
+            self.encoder = [(NoneEncoder() if enc is None else enc) for enc in encoder]
+        
+        # split_size
+        self._set_split_size(split_size)
+        
+        # params
+        self.random_state = random_state
+        # 클래스 전용 난수 생성기
+        self.generator = torch.Generator()
+        if self.random_state is not None:
+            self.generator.manual_seed(random_state)
+        
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.stratify = self._to_dataframe(stratify) if stratify is not None else None
+        self.kwargs = kwargs
+        
+        # dataset & dataloader        
+        self.dataset = None
+        self.dataloader = None
+
+    def _to_dataframe(self, data):
+        row_dim = len(data)
+        if 'DataFrame' not in str(type(data)):
+            column_dim = len(data[0])
+            columns = list(np.arange(column_dim))
+            data_index = list(np.arange(row_dim))
+            return pd.DataFrame(data, columns=columns, index=data_index)
+        else:
+            return data
+    
+    def _set_split_size(self, split_size):
+        self.split_size = [s/np.sum(split_size) for s in split_size]
+        
+        if len(self.split_size) == 2:
+            self.train_test_split_size = self.split_size
+            self.train_valid_split_size = None
+        elif len(self.split_size) == 3:
+            self.train_test_split_size = [self.split_size[0]+self.split_size[1], self.split_size[2]]
+            self.train_valid_split_size = [s/self.train_test_split_size[0] for s in self.split_size[:2]]
+    
+    def split(self, split_size=None, random_state=None, shuffle=None, stratify=None, verbose=0):
+        self.random_state = self.random_state if random_state is None else random_state
+        self.shuffle = self.shuffle if shuffle is None else shuffle
+        self.stratify = self.stratify if stratify is None else self._to_dataframe(stratify)
+        if split_size is not None:
+            self._set_split_size(split_size)
+        
+        # index split
+        # train_test_split
+        self.train_idx, self.test_idx = train_test_split(self.full_index, test_size=self.train_test_split_size[-1], random_state=self.random_state, shuffle=self.shuffle, stratify=self.stratify)
+        self.index = {'train':self.train_idx, 'text':self.test_idx}
+        
+        # train_valid_split
+        if self.train_valid_split_size is not None: 
+            train_valid_stratify = self.stratify.loc[self.train_idx] if self.stratify is not None else None
+            self.train_idx, self.valid_idx = train_test_split(self.train_idx, test_size=self.train_valid_split_size[-1], random_state=self.random_state, shuffle=self.shuffle, stratify=train_valid_stratify)
+            self.index = {'train':self.train_idx, 'valid':self.valid_idx, 'test':self.test_idx}
+            self.split_data = {'train':[], 'valid':[], 'test':[]}
+        else:
+            self.split_data = {'train':[],  'test':[]}
+        
+        # data split
+        for idx, split_name in zip(self.index.values(), self.split_data.keys()):
+            self.split_data[split_name] = tuple([df.loc[idx] for df in self.df_data])
+        
+        # split dataframe
+        for name, data in self.split_data.items():
+            split_df = pd.concat(data, axis=1)    
+            split_df.insert(0, 'train_valid_test', name)
+            self.split_dataframe = pd.concat([self.split_dataframe, split_df], axis=0)
+        self.split_dataframe.sort_index(inplace=True)
+        
+        if verbose > 0:
+            [print(len(index), end=', ') for index in self.index.values()]
+        return self.split_data
+
+    def encoding(self, encoder=None):
+        self.encoder = self.encoder if encoder is None else encoder
+        
+        if len(self.split_data) == 0:
+            raise Exception("'data_split' must be performed first.")
+        else:
+            if len(self.encoder) != len(self.df_data):
+                raise Exception("'encoder' must have the same number as data_args.")
+            else:
+                for split_name, data in self.split_data.items():
+                    transformed_data_list = []
+                    for ei in range(len(self.encoder)):
+                        if split_name == 'train':
+                            transformed_data = self.encoder[ei].fit_transform(data[ei])
+                        else:
+                            transformed_data = self.encoder[ei].transform(data[ei])
+                        
+                        # to_array & dtype
+                        if str(self.encoder[ei]) == 'OneHotEncoder()':
+                            transformed_data = transformed_data.toarray().astype(np.int64)
+                        transformed_data_list.append(transformed_data)
+                    self.transformed_data[split_name] = tuple(transformed_data_list)
+        
+        return self.transformed_data
+    
+    # full process for transformed data
+    def fit_transform(self, split_size=None, encoder=None, random_state=None, shuffle=None, stratify=None, verbose=0):
+        self.split(split_size=split_size, random_state=None, shuffle=shuffle, stratify=stratify, verbose=verbose)
+        return self.encoding(encoder=encoder)
+
+    def make_tensor_dataset(self):
+        if len(self.transformed_data) == 0:
+            raise Exception("'encoding' must be performed first.")
+        else:
+            dtypes_str = [str(data.dtype) for data in self.transformed_data['train']]
+            
+            for name, data_tuple in self.transformed_data.items():
+                data_tensor = []
+                for data, dtype in zip(data_tuple, dtypes_str):
+                    if 'float' in dtype:
+                        data_tensor.append(torch.FloatTensor(data))
+                    elif 'int' in dtype:
+                        data_tensor.append(torch.LongTensor(data))
+                    else:
+                        raise Exception("'torch tensor is only allowed 'int' or 'floar' types.")
+                self.tensor_dataset[name] = TensorDataset(*data_tensor)    
+        return self.tensor_dataset
+
+    def make_tensor_dataloader(self, batch_size=None, shuffle=None, random_state=None, **kwargs):
+        self.batch_size = self.batch_size if batch_size is None else batch_size
+        self.shuffle = self.shuffle if shuffle is None else shuffle
+        if random_state is not None:
+            self.random_state = random_state
+            self.generator = torch.Generator()
+            self.generator.manual_seed(random_state)
+        
+        if len(self.tensor_dataset) == 0:
+            raise Exception("'make_tensor_dataset' must be performed first.")
+        else:
+            for name, tensor_dataset in self.tensor_dataset.items():
+                self.tensor_dataloader[name] = DataLoader(tensor_dataset, batch_size=self.batch_size, shuffle=self.shuffle, generator=self.generator, **kwargs)
+        
+        return self.tensor_dataloader
+    
+    # full process for torchDataset
+    def fit_tensor_dataloader(self, split_size=None, encoder=None, batch_size=None, random_state=None, shuffle=None, stratify=None, verbose=0, **kwargs):
+        self.fit_transform(split_size=split_size, encoder=encoder, random_state=random_state, shuffle=shuffle, stratify=stratify, verbose=verbose)
+        self.make_tensor_dataset()
+        return self.make_tensor_dataloader(batch_size=batch_size, shuffle=shuffle, random_state=random_state, **kwargs)
+    
+    def _repr_dictformat(self, dict_in, intend=4, parentheses_sep="\n"):
+        repr_output = "{" + f"{parentheses_sep}"
+        for i, (name, shapes) in enumerate(dict_in.items()):
+            comma = "," if i < len(dict_in) - 1 else ""
+            if i==0:
+                if parentheses_sep == "\n":
+                    repr_output += f"{' '*intend}'{name}': {shapes}{comma}"
+                else:
+                    repr_output += f"'{name}': {shapes}{comma}"
+            else:
+                repr_output += f"\n{' '*intend}'{name}': {shapes}{comma}"
+        if parentheses_sep == '\n':
+            repr_output +=  f"{parentheses_sep}{' ' * intend}" +"}"
+        else:
+            repr_output +=  f"{parentheses_sep}" +"}"
+        return repr_output
+    
+    def get_feature_names_out(self):
+        if len(self.encoder) > 0:
+            return tuple([encoder.get_feature_names_out() for encoder in self.encoder])
+    
+    def __repr__(self):
+        repr_str = "<df_data : " + ", ".join([str(df.shape) for df in self.df_data]) + ">"
+        if len(self.split_data) > 0:
+            split_ratio_str = {name: size.item() for (name, data), size in zip(self.split_data.items(), self.split_size)}
+            split_size_str = {name: tuple([data.shape for data in data_tuple]) for name, data_tuple in self.split_data.items()}
+            repr_str += f"\n  └ self.split_size: {split_ratio_str}" + f"\n    split_data: {self._repr_dictformat(split_size_str, intend=20, parentheses_sep='')}"
+            
+        if len(self.transformed_data) > 0:
+            encoder_str = str(tuple(self.encoder))
+            trainsformed_str = {name: tuple([data.shape for data in data_tuple]) for name, data_tuple in self.transformed_data.items()}
+            repr_str += f"\n  └ self.encoder: {encoder_str}" + f"\n    transformed_data: {self._repr_dictformat(trainsformed_str, intend=20, parentheses_sep='')}"
+        
+        if len(self.tensor_dataset) > 0:
+            repr_str += f"\n  └ self.tensor_dataset: {self._repr_dictformat(self.tensor_dataset, intend=20, parentheses_sep='')}"
+        
+        if len(self.tensor_dataloader) > 0:
+            repr_str += f"\n  └ (dataloader options) batch_size: {self.batch_size}, shuffle: {self.shuffle}, random_state: {self.random_state}" +  f"\n    self.tensor_dataloader: {self._repr_dictformat(self.tensor_dataloader, intend=20, parentheses_sep='')}"
+        return repr_str
+
+# df_y = pd.DataFrame(np.random.rand(20,1), columns=['y'])
+# df_X_con = pd.DataFrame(np.random.rand(20,5), columns=[f"x{i+1}" for i in range(5)])
+# X_cat_gen = np.concatenate([np.random.randint(0,4, size=(20,2)), np.random.randint(0,2, size=(20,3))], axis=1)
+# df_X_cat = pd.DataFrame(X_cat_gen, columns=[f"x{i+6}" for i in range(5)])
+
+# df_tuple = (df_y, df_X_con, df_X_cat)
+# df_tuple = (df_y.to_numpy(), df_X_con.to_numpy(), df_X_cat.to_numpy())
+
+# pc = Preprocessing(*df_tuple, split_size=(0.8, 0.2), stratify=df00[X_cols_cat])
+# pc = Preprocessing(*df_tuple, stratify=df00[X_cols_cat], encoder=[StandardScaler(), StandardScaler(), LabelEncoder2D()])
+# pc = DataPreprocessing(*df_tuple, stratify=df00[X_cols_cat], encoder=[StandardScaler(), StandardScaler(), OneHotEncoder(sparse_output=True)])
+# pc = DataPreprocessing(*df_tuple, stratify=df00[X_cols_cat], encoder=[StandardScaler(), None, LabelEncoder2D()])
+# pc = DataPreprocessing(*df_tuple, stratify=df00[X_cols_cat])
+
+# pc = DataPreprocessing(*df_tuple
+#                        ,split_size=(5,1,2)
+#                        ,stratify=df_X_cat.iloc[:,[-1]]
+#                        ,encoder=[StandardScaler(), StandardScaler(), LabelEncoder2D()]
+#                        ,batch_size=128
+#                        ,shuffle=True
+#                        ,random_state=1
+#                        )
+
+# a1 = pc.split()
+# a2 = pc.encoding()
+# a3 = pc.make_tensor_dataset()
+# a4 = pc.make_tensor_dataloader()
+# a2 = pc.fit_transform()
+# a4 = pc.fit_tensor_dataloader()
+
+# pc.index
+# pc.get_feature_names_out()
+# pc.split_size
+# pc.split_data
+# pc.split_dataframe
+# pc.transformed_data
+# pc.tensor_dataset
+# pc.tensor_dataloader
+
+
+
+
+# --------------------------------------------------------------------------------------
+
+
+
+class DS_KFold():
+    def __init__(self, n_splits=5, shuffle=False, random_state=None, valid_ratio=None):
+        self.n_splits = n_splits
+        self.shuffle = shuffle
+        self.random_state = random_state
+        self.valid_ratio = valid_ratio
+        self.skf = StratifiedKFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+        self.kf = KFold(n_splits=n_splits, shuffle=shuffle, random_state=random_state)
+
+    def _combine_labels(self, stratify):
+        """
+        다중 출력 stratify 데이터를 하나의 레이블로 변환
+        """
+        stratify = np.array(stratify)
+        if stratify.ndim == 1:
+            return stratify
+        return np.array(["_".join(map(str, row)) for row in stratify])
+
+    def split(self, X, stratify=None, groups=None):
+        """
+        X: 특징 데이터
+        stratify: 레이블 데이터 (None이면 stratify 없이 random split)
+        """
+        if stratify is None:
+            splitter = self.kf
+            stratify_combined = None
+        else:
+            stratify_combined = self._combine_labels(stratify)
+            splitter = self.skf
+
+        for train_idx, test_idx in splitter.split(X, stratify_combined, groups):
+            if self.valid_ratio is not None and self.valid_ratio > 0:
+                # validation split 시 stratify 가능 여부 확인
+                if stratify is None:
+                    stratify_arg = None
+                else:
+                    unique, counts = np.unique(stratify_combined[train_idx], return_counts=True)
+                    stratify_arg = stratify_combined[train_idx] if np.min(counts) >= 2 else None
+
+                train_sub_idx, valid_idx = train_test_split(
+                    train_idx,
+                    test_size=self.valid_ratio,
+                    stratify=stratify_arg,
+                    shuffle=self.shuffle,
+                    random_state=self.random_state
+                )
+                yield train_sub_idx, valid_idx, test_idx
+            else:
+                yield train_idx, test_idx
+
+    def get_n_splits(self, X=None, stratify=None, groups=None):
+        return self.n_splits
+
+
+
+
+################################################################################################
+
+
+
+
+
+
+
+
+
+# class DataSet():
+#     """
+#     【required (Library)】copy, functools, numpy(np), pandas(pd), torch, tensorflow(tf)
+    
+#     < Attribute >
+#       self.inputdata_info
+#       self.dataloader_info
+#       self.dataloader
+      
+#     < Method >
+#       . self.Dataset
+#       . self.Split
+#       . self.Encoding (self.Decoding)
+#       . self.Batch
+#       . self.Reset_dataloader
+      
+#     < Funtion >
+#       . self.make_data_info
+#       . self.dataloader_to_info
+#       . self.info_to_dataloader
+#       . self.data_transform_from_numpy
+#       . self.split_size
+#       . self.data_slicing
+#       . self.data_split
+#       . self.data_transform
+#       . self.make_batch
+      
+    
+#     """
+#     def __init__(self, X=None, y=None,  X_columns=None, y_columns=None, kwargs_columns={},
+#                 type = ['pandas', 'numpy', 'tensorflow', 'torch'], set_type={},
+#                 X_encoder=None, y_encoder=None, encoder={},
+#                 shuffle=False, random_state=None, **kwargs):
+        
+#         # all input value save
+#         local_values = locals().copy()
+        
+#         dataloader_info = {}
+#         # dataloader = {}
+#         self.data_columns_couple = {None: None, 'X':X_columns, 'y': y_columns}
+        
+#         for arg_name, arg_value in local_values.items():
+#             if arg_name not in ['self', 'random_state', 'kwargs']:
+#                 exec(f"self.{arg_name} = arg_value")
+                
+#                 if arg_name in ['X', 'y']:
+#                     if arg_value is not None and arg_value.shape[0] > 0:
+#                         dataloader_info[arg_name] = {}
+#                         dataloader_info[arg_name]['data'] = self.make_data_info(arg_value, prefix=arg_name, columns=self.data_columns_couple[arg_name], return_data=True) if arg_value is not None else None
+                    
+#         for kwarg_name, kwarg_value in kwargs.items():
+#             if kwarg_value is not None and kwarg_value.shape[0] > 0:
+#                 kwargs_column = kwargs_columns[kwarg_name] if kwarg_name in kwargs_columns.keys() else None
+#                 dataloader_info[kwarg_name] = {}
+#                 dataloader_info[kwarg_name]['data'] = self.make_data_info(kwarg_value, prefix=kwarg_name, columns=kwargs_column, return_data=True) if kwarg_value is not None else None
+        
+#         # self.local_values = local_values
+#         self.set_type = set_type
+#         # self.inputdata_info = dataloader_info
+        
+#         initialize_object = self.info_to_dataloader(dataloader_info, set_type=set_type)
+#         self.dataloader = initialize_object['dataloader']
+#         self.dataloader_info = initialize_object['data_info']
+#         self.inputdata_info = copy.deepcopy(self.dataloader_info)
+                
+#         self.random_state = random_state
+#         self.define_random_generate(random_state)
+#         self.indices = {}
+#         self.length = {}
+        
+#         self.dataloader_process = ''
+
+#     # [funcation] ---------------------------
+#     def define_random_generate(self, random_state=None):
+#         self.random_generate = np.random.RandomState(self.random_state) if random_state is None else np.random.RandomState(random_state)
+#         # self.random_generate = np.random.default_rng(random_state)
+
+#     def make_data_info(self, data, prefix=None, columns=None, iloc_index=None, loc_index=None, dtype=None, return_data=False):
+#         prefix = 'v' if prefix is None else prefix
+#         type_of_data = str(type(data))
+        
+#         array_data = np.array(data)
+#         shape = array_data.shape
+#         n_dim = len(shape)
+        
+#         # type
+#         result_of_type = None
+#         if 'pandas' in type_of_data:
+#             result_of_type = 'pandas'
+#         elif 'numpy' in type_of_data:
+#             result_of_type = 'numpy'
+#         elif 'tensorflow' in type_of_data:
+#             result_of_type = 'tensorflow'
+#             # result_of_type =  'tensorflow - variable' if 'variable' in type_of_data.lower() else 'tensorflow - constant'      
+#         elif 'torch' in type_of_data:
+#             result_of_type = 'torch'
+#         else:
+#             result_of_type = 'else'
+        
+#         # dtype
+#         if dtype is None:
+#             if  result_of_type == 'pandas':
+#                 dtype = data.dtype if n_dim == 1 else data.dtypes.to_dict()
+#             else:
+#                 dtype = data.dtype
+            
+            
+#         # columns
+#         if columns is not None:
+#             set_columns = columns
+#         elif result_of_type == 'pandas':
+#             set_columns = str(data.name) if n_dim == 1 else np.array(data.columns)
+#         else:
+#             if n_dim == 1:
+#                 set_columns = prefix
+#             elif n_dim > 1:
+#                 col_base = np.array(range(shape[-1])).astype('str')
+#                 set_columns = np.tile(col_base, np.array(shape[:-2]).prod()).reshape(*list(shape[:-2]), shape[-1]).astype('str')
+#                 set_columns = np.char.add(prefix, set_columns)
+                
+#         # index
+#         if iloc_index is None and loc_index is None:
+#             if result_of_type == 'pandas':
+#                 loc_index = np.array(data.index)
+#                 iloc_index = np.array(range(shape[0]))
+#             else:
+#                 loc_index = np.array(range(shape[0]))
+#                 iloc_index = np.array(range(shape[0]))
+#         else:
+#             if result_of_type == 'pandas':
+#                 loc_index = np.array(data.index) if loc_index is None else np.array(loc_index)
+#                 iloc_index = (np.array(range(shape[0])) if loc_index is None else loc_index) if iloc_index is None else np.array(iloc_index)
+#             else:
+#                 loc_index = (np.array(range(shape[0])) if iloc_index is None else iloc_index) if loc_index is None else np.array(loc_index)
+#                 iloc_index = (np.array(range(shape[0])) if loc_index is None else loc_index) if iloc_index is None else np.array(iloc_index)
+        
+#         if return_data:
+#             return {'type': result_of_type, 'ndim': n_dim, 'dtype': dtype, 'columns': set_columns, 'loc_index' :loc_index, 'iloc_index':iloc_index, 'data': array_data}
+#         else:
+#             return {'type': result_of_type, 'ndim': n_dim, 'dtype': dtype, 'columns': set_columns, 'loc_index' :loc_index, 'iloc_index':iloc_index}
+
+#     def dataloader_to_info(self, dataloader, data_info=None, update_loader=False):
+#         return_data_info = {}
+#         for name, dataset in dataloader.items():
+#             return_data_info[name] = {}
+#             for dataset_name, data in dataset.items():
+#                 if data_info is None:
+#                     return_data_info[name][dataset_name] = self.make_data_info(data=data)
+#                 else:
+#                     info = data_info[name][dataset_name]
+#                     return_data_info[name][dataset_name] = self.make_data_info(data=data, columns=info['columns'], iloc_index=info['iloc_index'], loc_index=info['loc_index'], return_data=True)
+#         if update_loader is True:
+#             return_dataloader = self.info_to_dataloader(return_data_info, update_info=False)
+#             return {'dataloader': return_dataloader['dataloader'], 'data_info':return_data_info}
+#         else:
+#             return {'dataloader': dataloader, 'data_info':return_data_info}
+
+#     def info_to_dataloader(self, data_info, set_type={}, update_info=False):
+#         return_dataloader = {}
+#         self.set_type.update(set_type)
+        
+#         for name, dataset in data_info.items():
+#             return_dataloader[name] = {}
+#             for dataset_name, info in dataset.items():
+#                 if self.set_type is None:
+#                     apply_type = info['type']
+#                 elif type(self.set_type) == str:
+#                     apply_type = self.set_type
+#                 elif type(self.set_type) == dict:
+#                     apply_type = self.set_type[name] if name in self.set_type.keys() else info['type']
+#                 return_dataloader[name][dataset_name] = self.data_transform_from_numpy(numpy_data=info['data'], set_type=apply_type,
+#                                                         index=info['loc_index'], columns=info['columns'], dtype=info['dtype'])
+#         if len(self.set_type) > 0 or update_info is True:
+#             return_data_info = self.dataloader_to_info(return_dataloader, data_info=data_info, update_loader=False)
+#             return {'dataloader': return_dataloader, 'data_info':return_data_info['data_info']}
+#         else:
+#             return {'dataloader':return_dataloader, 'data_info':data_info}
+
+#     def data_transform_from_numpy(self, numpy_data, set_type, index=None, columns=None, dtype=None):
+#         shape = numpy_data.shape
+#         ndim = len(shape)
+        
+#         # dtype
+#         if dtype is not None:
+#             if type(dtype) == dict:     # pandas
+#                 if set_type == 'pandas':
+#                     apply_dtype = dtype
+#                 else:
+#                     apply_dtype = np.dtype('float32')
+#             elif 'torch' in str(dtype):     # torch
+#                 apply_dtype = np.dtype(str(dtype).split('.')[-1])
+#             elif '<dtype:' in str(dtype):   # tensorflow
+#                 apply_dtype = np.dtype(dtype.as_numpy_dtype)
+#             else:
+#                 apply_dtype = dtype
+#         else:
+#             apply_dtype = dtype
+                
+#         # set_type transform
+#         if set_type == 'numpy':
+#             return numpy_data
+#         elif set_type == 'pandas':
+#             if ndim == 1:
+#                 return pd.Series(numpy_data, index=index, name=columns, dtype=apply_dtype)
+#             elif ndim == 2:
+#                 if apply_dtype is None:
+#                     return pd.DataFrame(numpy_data, index=index, columns=columns)
+#                 else:
+#                     if type(apply_dtype) != dict:
+#                         if columns is None:
+#                             apply_dtype = {c: apply_dtype for c in range(numpy_data.shape[1])}
+#                         else:
+#                             apply_dtype = {c: apply_dtype for c in columns}
+#                     return pd.DataFrame(numpy_data, index=index, columns=columns).astype(apply_dtype)
+#         elif set_type == 'tensorflow':
+#             return tf.constant(numpy_data, dtype=apply_dtype)
+#         elif set_type == 'torch':
+#             return torch.FloatTensor(numpy_data)
+#             # return torch.tensor(numpy_data, dtype=eval(f'torch.{str(apply_dtype)}'))
+
+#     def split_size(self, valid_size, test_size):
+#         self.valid_size = valid_size
+#         self.test_size = test_size
+        
+#         self.train_size = 1 - test_size
+#         self.train_train_size = self.train_size - valid_size
+#         self.train_valid_size = valid_size
+
+#     def generate_index(self, data, data_info=None, valid_size=None, test_size=None, shuffle=True,
+#                       random_state=None):
+#         try:
+#             data_length = len(data)
+#         except:
+#             data_length = data.shape[0]
+#         if data_info is None:
+#             data_info = self.make_data_info(data=data)
+            
+#         index = data_info['iloc_index']
+#         indices = {}
+
+#         # shuffle
+#         if shuffle is True:
+#             random_generate = self.random_generate if random_state is None else np.random.RandomState(random_state)
+#             apply_index = random_generate.permutation(index)
+#         else:
+#             apply_index = index
+        
+#         # split_size
+#         self.split_size(valid_size = 0.0 if valid_size is None else valid_size,
+#                         test_size = 0.3 if test_size is None else test_size)
+        
+#         # train_valid_test split
+#         train_len = int(data_length * (1-self.test_size))
+#         train_train_len = int(train_len * (1-self.train_valid_size))
+#         train_valid_len = train_len - train_train_len
+#         test_len = data_length - train_len
+        
+#         for k, v in zip(['data','train', 'train_train', 'train_valid', 'test'], [train_len, train_train_len, train_valid_len, test_len]):
+#             if v > 0:
+#                 self.length[k] = v
+        
+#         # save
+#         indices['all_index'] = index
+#         indices['apply_index'] = apply_index
+#         indices['train_index'] = apply_index[:train_len]
+#         indices['train_train_index'] = indices['train_index'][:train_train_len]
+#         if train_valid_len > 0:
+#             indices['train_valid_index'] = indices['train_index'][train_train_len:]
+#         indices['test_index'] = apply_index[train_len:]
+        
+#         return indices
+
+#     def data_slicing(self, data=None, apply_index=None, data_info=None, index_type='iloc'):
+#         # data_info
+#         if data_info is None:
+#             data_info = self.make_data_info(data=data, return_data=True)
+
+#         numpy_data = data_info['data']
+        
+#         if index_type == 'iloc':
+#             index_series = pd.Series(data_info['loc_index'], index=range(len(numpy_data)) )
+#             iloc_index = np.array(index_series[apply_index].index) 
+#             loc_index = np.array(index_series[apply_index].values)
+#         elif index_type == 'loc':
+#             index_series = pd.Series(range(len(numpy_data)), index=data_info['loc_index'])
+#             iloc_index = np.array(index_series[apply_index].values) 
+#             loc_index = np.array(index_series[apply_index].index)
+        
+#         # slicing
+#         sliced_data = np.take(numpy_data, iloc_index, axis=0)
+#         # sliced_index = np.take(data_index, apply_index, axis=0)
+#         return self.data_transform_from_numpy(numpy_data=sliced_data, index=loc_index, 
+#                                             set_type=data_info['type'], columns=data_info['columns'], dtype=data_info['dtype'])       
+
+#     def data_split(self, data, data_info=None, indices=None, valid_size=0, test_size=0, shuffle=True,
+#                    index_type='iloc', random_state=None, verbose=0):
+#         # data_info
+#         if data_info is None:
+#             data_info = self.make_data_info(data=data, return_data=True)
+            
+#         if indices is None:
+#             if len(self.indices) == 0:
+#                 indices = self.generate_index(data=data, valid_size=valid_size, test_size=test_size, 
+#                                               shuffle=shuffle, random_state=random_state)
+#             else:
+#                 indices = self.indices
+        
+#         split_data = {}
+#         for key, index in indices.items():
+#             split_data[key] = self.data_slicing(data=data, apply_index=index, data_info=data_info, index_type=index_type)
+#             if verbose > 0:
+#                 print(f"{key}: {split_data[key].shape}")
+            
+#         return {'split_data': split_data, 'indices':indices}
+
+#     def data_transform(self, data, data_info=None, encoder=None, type='encoding'):
+#         if encoder is None:
+#             return data
+#         else:
+#             try:
+#                 if 'enco' in type:
+#                     return encoder.transform(data)
+#                 elif 'deco' in type:
+#                     return encoder.inverse_transform(data)
+#             except:
+#                 # data_info
+#                 if data_info is None:
+#                     data_info = self.make_data_info(data=data, return_data=True)
+#                 if 'enco' in type:
+#                     transformed_np_data = encoder.transform(data_info['data'])
+#                 elif 'deco' in type:
+#                     transformed_np_data = encoder.inverse_transform(data_info['data'])
+#                 transformed_data = self.data_transform_from_numpy(numpy_data=transformed_np_data, 
+#                                                set_type=data_info['type'], columns=data_info['columns'], dtype=None)
+#                 return transformed_data
+
+#     def make_batch(self, data, batch_size=None):
+#         try:
+#             data_length = len(data)
+#         except:
+#             data_length = data.shape[0]
+        
+#         batch_size = data_length if batch_size is None or batch_size <= 0 or batch_size > data_length else batch_size
+#         batch_index = 0
+#         batch = []
+#         while True:
+#             if batch_index + batch_size >= data_length:
+#                 batch.append(data[batch_index:])
+#                 batch_index = data_length
+#                 # batch = np.array(batch)
+#                 break
+#             else:
+#                 batch.append(data[batch_index:batch_index + batch_size])
+#                 batch_index = batch_index + batch_size
+#         return batch
+
+#     # [method] ---------------------------
+#     def Reset_dataloader(self):
+#         self.dataloader_info = copy.deepcopy(self.inputdata_info)
+#         self.dataloader = self.info_to_dataloader(self.dataloader_info)['dataloader']
+#         self.dataloader_process = ''
+
+#     def Dataset(self, kwargs_columns={}, set_type={}, **kwargs):
+#         for kwarg_name, kwarg_value in kwargs.items():
+#             if kwarg_value is not None and kwarg_value.shape[0] > 0:
+#                 kwargs_column = kwargs_columns[kwarg_name] if kwarg_name in kwargs_columns.keys() else None
+#                 self.dataloader_info[kwarg_name] = {}
+#                 self.dataloader_info[kwarg_name]['data'] = self.make_data_info(kwarg_value, prefix=kwarg_name, columns=kwargs_column, return_data=True) if kwarg_value is not None else None
+#                 self.inputdata_info[kwarg_name] = {}
+#                 self.inputdata_info[kwarg_name] = self.dataloader_info[kwarg_name]['data']
+#         # set dataset / data_info
+#         update_object = self.info_to_dataloader(dataloader_info, set_type=set_type)
+#         self.dataloader = self.info_to_dataloader(self.dataloader_info, set_type=set_type)['dataloader']
+#         self.dataloader_info = update_object['data_info']
+#         self.inputdata_info = copy.deepcopy(self.dataloader_info)
+#         return self
+
+#     def Encoding(self, X_encoder=None, y_encoder=None, encoder={}):
+#         # encoder dictionary
+#         self.encoder.update(encoder)
+#         X_encoder = self.X_encoder if X_encoder is None else X_encoder
+#         y_encoder = self.y_encoder if y_encoder is None else y_encoder
+#         if X_encoder is not None:
+#             encoder['X'] = X_encoder
+#         if y_encoder is not None:
+#             encoder['y'] = y_encoder
+        
+#         # encoding
+#         encoder_keys = encoder.keys()
+#         for name, data_dict in self.dataloader.items():
+#             for dataset_name, data in data_dict.items():
+#                 if name in encoder_keys and encoder[name] is not None:
+#                     data_info = self.dataloader_info[name][dataset_name]
+#                     encodered_data = self.data_transform(data=data, data_info=data_info, encoder=encoder[name], type='encoding')
+#                     self.dataloader[name][dataset_name] = encodered_data
+#                     self.dataloader_info[name][dataset_name] = self.make_data_info(data=encodered_data, columns=data_info['columns'], 
+#                                                                                     iloc_index= data_info['iloc_index'],
+#                                                                                     return_data=True)
+#         # __repr__
+#         self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + 'Encoding'
+
+#     def Decoding(self, X_encoder=None, y_encoder=None, encoder={}):
+#         # encoder dictionary
+#         self.encoder.update(encoder)
+#         X_encoder = self.X_encoder if X_encoder is None else X_encoder
+#         y_encoder = self.y_encoder if y_encoder is None else y_encoder
+#         if X_encoder is not None:
+#             encoder['X'] = X_encoder
+#         if y_encoder is not None:
+#             encoder['y'] = y_encoder
+        
+#         # decoding
+#         encoder_keys = encoder.keys()
+#         for name, data_dict in self.dataloader.items():
+#             for dataset_name, data in data_dict.items():
+#                 if name in encoder_keys and encoder[name] is not None:
+#                     data_info = self.dataloader_info[name][dataset_name]
+#                     encodered_data = self.data_transform(data=data, data_info=data_info, encoder=encoder[name], type='decoding')
+#                     self.dataloader[name][dataset_name] = encodered_data
+#                     self.dataloader_info[name][dataset_name] = self.make_data_info(data=encodered_data, columns=data_info['columns'], 
+#                                                                                     iloc_index= data_info['iloc_index'],
+#                                                                                     dtype=self.inputdata_info[name]['data']['dtype'],
+#                                                                                     return_data=True)
+#         # __repr__
+#         self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + 'Decoding'
+
+#     def Split(self, valid_size=0, test_size=0.3, shuffle=True, random_state=None):
+#         random_state = self.random_state if random_state is None else random_state
+        
+#         # train_valid_test_split
+#         for name, data_dict in self.dataloader.items():
+#             data_info = self.dataloader_info[name]['data']
+#             splited_dict = self.data_split(data=data_dict['data'], data_info=data_info,
+#                             valid_size=valid_size, test_size=test_size, shuffle=shuffle, 
+#                             index_type='iloc', random_state=self.random_state)
+#             del splited_dict['split_data']['all_index']
+#             del splited_dict['split_data']['apply_index']
+#             del splited_dict['indices']['all_index']
+#             del splited_dict['indices']['apply_index']
+            
+#             for dataset_name, index in splited_dict['indices'].items():
+#                 data = splited_dict['split_data'][dataset_name]
+#                 set_name = dataset_name.replace('index','set')
+#                 self.dataloader[name][set_name] = data
+#                 self.dataloader_info[name][set_name] = self.make_data_info(data=data,
+#                                                                    columns=data_info['columns'],
+#                                                                    iloc_index=index,
+#                                                                    loc_index=np.take(data_info['loc_index'], index),
+#                                                                    dtype=data_info['dtype'],
+#                                                                    return_data=True)
+#         # __repr__
+#         self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + 'Split'
+
+#     def Batch(self, batch_size=None, shuffle=True, random_state=None):
+#         if shuffle is True:
+#             random_generate = self.random_generate if random_state is None else np.random.RandomState(random_state)
+        
+#         # transform to batch
+#         for name, data_dict in self.dataloader.items():
+#             for dataset_name, data in data_dict.items():
+#                 batch_data = []
+#                 data_info = self.dataloader_info[name][dataset_name]
+#                 dataset_index = data_info['loc_index']
+#                 if shuffle is True:
+#                     dataset_index = random_generate.permutation(dataset_index)
+#                 batch_indices = self.make_batch(dataset_index, batch_size=batch_size)
+                
+#                 for batch_index in batch_indices:
+#                     batch_sliced_data = self.data_slicing(data, data_info=data_info, apply_index=batch_index, index_type='loc')
+#                     batch_data.append( batch_sliced_data )
+                
+#                 # update dataloader
+#                 self.dataloader[name][dataset_name] = batch_data
+                
+#                 # update dataloader_info
+#                 self.dataloader_info[name][dataset_name]['batch_iloc_index'] = batch_indices
+#         # __repr__
+#         self.dataloader_process = self.dataloader_process + ('\n . ' if self.dataloader_process == '' else ' > ') + f'Batch({batch_size})'
+
+#     def __repr__(self):
+#         data_set_names = ', '.join(list(self.dataloader.keys()))
+#         return f'<class: DataLoader Object ({data_set_names})>{self.dataloader_process}'
 
 
 
@@ -1075,6 +1556,7 @@ class DataSet():
 
 # ds.Reset_dataloader()
 
+################################################################################################
 
 
 
@@ -2145,6 +2627,8 @@ class FeatureInfluence():
 # fi.predict(test_set[X_cols], return_all=True)
 
 # fi.plot_element(x='Survived')
+
+
 
 
 
