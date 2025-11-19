@@ -308,7 +308,7 @@ def list_transform(series, columns, fillna=None, auto_format=False, return_type=
 
 # 선택된 Column들을 하나의 값으로 묶어주는 함수
 def join_series(data, columns='all', join='~', fillna=None, decimal_revision=0):
-    if columns is 'all':
+    if columns == 'all':
         target_columns = list(data.columns)
     else:
         target_columns = columns
