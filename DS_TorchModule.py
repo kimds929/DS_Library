@@ -1046,7 +1046,7 @@ class AttentionPooling(nn.Module):
         self.learnable_threshold = learnable_threshold
         self.eps = eps
         
-        self.query = nn.Parameter(torch.randn(d_model)/d_model)  # 학습 가능한 Query (d_model, )
+        self.query = nn.Parameter(torch.randn(d_model)/d_model)  # 학습 가능한 Query (d_model, ) : 어떤 방식으로 요약할까?, 무엇이 중요한 시점인지를 학습하기 위함
         
         if self.learnable_threshold:
             self.threshold = nn.Parameter(torch.randn(1)/d_model)
@@ -1090,14 +1090,11 @@ class AttentionPooling(nn.Module):
         if self.learnable_threshold:
             tau = torch.sigmoid(self.threshold)
             attn_weights = torch.clamp_min(attn_weights - tau, 0.0)
-            denom = attn_weights.sum(dim=1, keepdim=True) + self.eps
+            denom = attn_weights.sum(dim=-2, keepdim=True) + self.eps
             attn_weights = attn_weights / denom
         
-        # 가중합
-        pooled = torch.sum(x * attn_weights.unsqueeze(-1), dim=-2)  # (B, d_model)
+        # Weighted Sum
+        pooled = torch.sum(x * attn_weights.unsqueeze(-1), dim=-2)  # (B,T,d_modl) * (B,T,1) = (B,T,d_modl) → sum → (B, d_model)
         return pooled, attn_weights
-    
-
-
 
 ####################################################################################################################################
