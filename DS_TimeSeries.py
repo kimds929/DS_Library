@@ -1,12 +1,13 @@
-import numba
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import scipy as sp
 
-
-import cvxpy 
-import cvxopt 
+try:
+    import numba
+    import cvxpy 
+except:
+    pass
 
 from collections import namedtuple
 import datetime
@@ -39,72 +40,196 @@ import statsmodels.api as sm
 
 
 
-def time_period_transform(data, freq, format=None):
-    # temp = pd.to_datetime(data, format=format)
-    # temp_frame = temp.to_frame()
-    # temp_frame.index = temp
-    # temp_frame.index.name = 'freq'
-    
-    # temp_result = temp_frame.resample(freq, label='left').min().dropna().reset_index()
-    # if ('y' in freq.lower()) or ('m' in freq.lower()) or ('q' in freq.lower()):
-    #     temp_result['freq'] = temp_result['freq'] + pd.DateOffset(days=1)
-    # result = temp_result[temp_result.columns[::-1]]
-    # result.iloc[:,0] = result.iloc[:,0].astype(data.dtype)
-    # result['freq'] = result['freq'].astype(str)
-    # return result
+# time_period_transform : 원본 날짜들 → 주기별로 그룹핑 → 각각의 구간에서 원래 값의 최소값을 반환
+def time_period_transform(date_time, freq, format=None):
+    """
+    날짜 시리즈를 특정 주기(freq) 단위로 변환한 뒤,
+    각 주기별로 원본 데이터의 최소값을 반환하는 함수.
 
-    if 'datetime' not in str(data.dtype):
-        data_time = pd.to_datetime(data, format=format)
+    Parameters
+    ----------
+    date_time : pandas.Series 
+        날짜 또는 문자열로 구성된 시리즈.
+        문자열인 경우 `format`에 따라 datetime으로 변환됨.
+    
+    freq : str
+        그룹핑할 주기.
+        pandas Period의 freq 규칙과 동일.
+        예: 'Y' (연도), 'Q' (분기), 'M' (월), 'W' (주), 'D' (일) 등
+    
+    format : str, optional
+        data가 문자열일 경우, datetime 파싱을 위한 포맷 문자열.
+        예: '%Y-%m-%d', '%Y%m%d', '%Y/%m/%d', ...
+        기본값 None이면 pandas가 자동으로 해석.
+
+    Returns
+    -------
+    pandas.DataFrame
+        두 개의 컬럼을 가진 DataFrame을 반환:
+        - 첫 번째 컬럼: 각 주기(freq) 그룹에 대한 원본 값의 최소값
+        - 두 번째 컬럼: 해당 최소값이 속한 Period (freq 단위)
+
+    Notes
+    -----
+    - 날짜를 pandas Period로 변환하여 동일한 주기에 속한 값끼리 그룹화함.
+    - 각 period별로 원래 date_time 값 중 최소값을 선택하여 반환함.
+    - 예를 들어 freq='M'이면, 각 달(month)별로 최소 날짜가 반환됨.
+
+    Examples
+    --------
+    >>> s = pd.Series(['2024-03-01', '2024-03-15', '2024-04-02'])
+    >>> time_period_transform(s, freq='M')
+         0       freq
+    0  2024-03  2024-03
+    1  2024-04  2024-04
+    """
+    # 1) datetime 변환
+    if 'datetime' not in str(date_time.dtype):
+        data_time = pd.to_datetime(date_time, format=format)
     else:
-        data_time = data.copy()
-    data_time_temp = data_time.apply(lambda x: pd.period_range(x, x, freq=freq)[0])
-    data_time_temp.name = 'freq'
+        data_time = date_time.copy()
+
+    # 2) 날짜 → Period
+    data_period = data_time.apply(lambda x: pd.period_range(x, x, freq=freq)[0])
+    data_period.name = 'freq'
+
+    # 3) 원본 데이터 + period 결합
+    df = pd.concat([data_period, data_time], axis=1)
     
-    data_time_temp_group = pd.concat([data_time_temp, data], axis=1)
-    return data_time_temp_group.groupby('freq')[data_time_temp_group.columns[1]].min().reset_index().iloc[:,[1,0]]
+    value_name = 'value'
+    if 'Series' in str(type(date_time)) and date_time.name is not None:
+        value_name = date_time.name 
+    df.columns = ['freq', value_name]   # 명시적으로 이름 지정
 
-# tpt = time_period_transform(d2['소둔_작업완료일시'], freq='d')
-# tpt2 = tpt.set_index('freq').resample('5d').min().dropna().reset_index()
-# tpt3= tpt2[tpt2.columns[::-1]]
+    # 4) 각 period별 최소값의 index를 가져옴 (원본 index 유지)
+    idx = df.groupby('freq')[value_name].idxmin()
 
-# f = plt.figure(figsize=(20,3))
-# plt.title('(고YS) 980DP 시계열실적 (실적 - 예측)')
-# plt.scatter(d2['소둔_작업완료일시'], d2['diff_YP'], alpha=0.2, color='steelblue', s=5)
-# plt.plot(d2['소둔_작업완료일시'], d2['diff_YP'],alpha=0.3, color='steelblue')
-# plt.plot(d2['소둔_작업완료일시'], trend, alpha=1, color='orange')
-# plt.xticks(*np.array(tpt3.T), rotation=45)
-# plt.axhline(0, color='black', alpha=0.7)
-# plt.show()
-# img_to_clipboard(f, dpi=150)
+    # 5) 해당 index의 행만 DataFrame으로 반환
+    result = df.loc[idx]
+    # result = df.loc[idx].sort_index()
+    return result
 
-
+# rng = pd.date_range(start='2024-01-01', end='2024-06-30', periods=30)   # '24.1/1~'24.6/30 까지 30 구간으로 나눔
+# sample = pd.Series(rng, name='time')
+# time_period_transform(sample, freq='M')     # 월별로 첫 data를 추출
 
 
 
 
-# datetime_split
-def datetime_split(x, date_format=['year','month','weekday','day','hour','second'], freq='S'):
+
+
+
+
+# datetime_split : datetime 객체(또는 datetime 시리즈)에서 원하는 날짜·시간 성분을 뽑아내고, freq(빈도 단위)에 따라 필요한 성분만 자동 필터링해서 반환하려는 목적
+def datetime_split(date_time, date_format=['year','month','weekday','day','hour','second'], freq='S'):
+    """
+    datetime 객체에서 여러 날짜·시간 구성요소(year, month, weekday, day, hour, minute, second)를
+    추출한 뒤, freq(시간 단위) 규칙에 따라 필요한 구성요소만 선택하여 반환하는 함수.
+
+    Parameters
+    ----------
+    date_time : pandas.Timestamp or pandas.Series (element-wise 적용 가능)
+        날짜·시간 정보를 포함하는 Timestamp 객체 또는 datetime-like 객체.
+    
+    date_format : list of str, optional
+        추출할 datetime 속성 이름 목록.
+        기본값은 ['year','month','weekday','day','hour','second'].
+        사용 가능한 값:
+        - 'year', 'month', 'weekday', 'day', 'hour', 'minute', 'second'
+
+    freq : str, {'y','m','w','d','H','M','S'}
+        반환할 datetime 구성요소의 수준(granularity)을 결정하는 단위.
+        - 'y' : 연도 단위 → ['year']
+        - 'm' : 월 단위 → ['year', 'month']
+        - 'w' : 주 단위 → ['year', 'month','weekday']
+        - 'd' : 일 단위 → ['year', 'month','weekday','day']
+        - 'H' : 시 단위 → ['year', 'month','day','weekday','hour']
+        - 'M' : 분 단위 → ['year', 'month','day','weekday','hour','minute']
+        - 'S' : 초 단위 → ['year', 'month','day','weekday','hour','minute','second']
+
+    Returns
+    -------
+    dict
+        freq 규칙에 의해 선택된 datetime 속성만 포함하는 dictionary.
+
+    Notes
+    -----
+    - 시계열 feature engineering 목적의 datetime 분해 기능.
+    - freq를 높일수록 더 많은 구성요소가 반환됨.
+    - pandas.Timestamp 및 pandas datetime-like 객체에 적용 가능.
+    """
     freq_map = {
-    'y':[],'m':['month'], 'w':['month', 'weekday'], 'd':['month','weekday','day'],
-    'H':['month','day','weekday','hour'], 
-    'M':['month','day','weekday','hour','minute'], 
-    'S':['month','day','weekday','hour','minute', 'second'], 
+    'y':['year'],'m':['year','month'], 'w':['year','month', 'weekday'], 'd':['year','month','weekday','day'],
+    'H':['year', 'month','day','weekday','hour'], 
+    'M':['year', 'month','day','weekday','hour','minute'], 
+    'S':['year', 'month','day','weekday','hour','minute', 'second'], 
     }
         
     transform_result = {}
-    for df in date_format:
-        if df  == 'weekday':
-            transform = x.weekday()
+    for format in date_format:
+        if format  == 'weekday':
+            transform = date_time.weekday()
         else:
-            transform = eval(f"x.{df}")
-        transform_result[df] = transform
+            transform = eval(f"date_time.{format}")
+        transform_result[format] = transform
     
     return dict(filter(lambda e : e[0] in freq_map[freq], transform_result.items()))
 
+# x = pd.Timestamp("2024-02-05 13:28:10")
+# datetime_split(x, freq='S')
+# datetime_split(x, date_format=['year','day'], freq='S')
+
+# dates = pd.date_range("2024-01-01 12:00:00", periods=5, freq="3H")
+# s = pd.Series(dates)
+# s.apply(lambda x: datetime_split(x, freq='M'))
 
 
-# sequential_transform
+
+# sequential_transform : 시계열 슬라이딩 윈도우(sliding window) 기능을 일반화한 함수
+#                       여러 개의 배열/시계열을 동시에, 동일한 슬라이딩 윈도우 범위로 잘라서 “윈도우 단위의 sequence 묶음”을 만들어주는 함수
 def sequential_transform(*args, window=1, start=0, stride=1):
+    """
+    여러 시계열(배열)을 동일한 슬라이딩 윈도우(sequential window)로 분리하여
+    window-shaped sequence 데이터를 생성하는 함수.
+
+    Parameters
+    ----------
+    *args : array-like or pandas.Series
+        슬라이딩 윈도우로 분리할 시계열(하나 이상).
+        여러 개가 들어올 경우 동일한 인덱스로 window가 적용됨.
+    
+    window : int, default=1
+        슬라이딩 윈도우 길이 (각 sequence 길이).
+    
+    start : int, default=0
+        (현재 코드에서는 사용되지 않지만) 윈도우 시작 offset을 지정하는 용도.
+    
+    stride : int, default=1
+        윈도우 이동 간격 (stride 길이).  
+        예: stride=1 → 겹치게 이동, stride=2 → 두 칸씩 이동.
+
+    Returns
+    -------
+    idx : numpy.ndarray, shape (num_windows, window)
+        슬라이딩 윈도우에 해당하는 원본 데이터의 인덱스 조합.
+
+    result : numpy.ndarray or list of numpy.ndarray
+        - 입력이 1개인 경우: 단일 3D 배열 (num_windows, window, feature_dim)
+        - 입력이 여러 개인 경우: 각 입력마다 동일한 윈도우를 적용한 배열 리스트.
+    
+    Notes
+    -----
+    - 1차원 입력은 자동으로 (N,1) 형태로 reshape되어 feature 차원이 유지됨.
+    - seq2seq, 시계열 예측, sliding-window feature engineering에 활용 가능.
+    - 모든 *args 는 길이가 같아야 한다.
+
+    Examples
+    --------
+    >>> x = [10, 20, 30, 40, 50]
+    >>> idx, seq = sequential_transform(x, window=3, stride=1)
+    >>> seq.shape
+    (3, 3, 1)
+    """
     idx = np.arange(0, len(args[0])-window + 1, step=stride).reshape(-1,1) + np.arange(0,window)
     
     result = []
@@ -115,156 +240,339 @@ def sequential_transform(*args, window=1, start=0, stride=1):
         result.append(x[idx,:])
     return idx, result[0] if len(args) == 1 else result
 
+# x = np.array([10, 20, 30, 40, 50])
+# idx, seq = sequential_transform(x, window=3, stride=1)
 
 
-# sequential_filter_index_from_src_index
+
+# sequential_filter_index_from_src_index : 이미 만들어진 source 윈도우 인덱스(src_idx)를 기준으로, 
+#                                         타깃 구간(target window) 인덱스를 계산하고, 범위를 벗어나는 경우를 필터링하는 함수
 def sequential_filter_index_from_src_index(src_idx, trg_window=1):
-    if hasattr(trg_window, '__iter__'):
-        win_low = trg_window[0]
-        win_up = trg_window[1]+1
+    """
+    source window 인덱스(src_idx)를 기준으로, 지정한 타깃 offset 구간(trg_window)을
+    모두 포함할 수 있는 유효한 window만 필터링하여,
+    source window 인덱스와 target window 인덱스를 함께 반환하는 함수.
+
+    이 함수는 보통 다음과 같은 시나리오에서 사용된다.
+    - src_idx : 과거 구간을 나타내는 입력 시퀀스(window) 인덱스 (예: X window)
+    - trg_window : 각 source window의 마지막 시점으로부터 얼마만큼
+                   앞/뒤 구간을 target window (예: y window)로 사용할지 정의
+
+    Parameters
+    ----------
+    src_idx : array-like, shape (num_windows, window_size)
+        sequential_transform 등으로 생성된 source window 인덱스 배열.
+        각 행은 하나의 window에 해당하고, 열은 해당 window를 구성하는 시점 인덱스를 의미.
+
+    trg_window : int or iterable, default=1
+        target window를 정의하는 offset.
+        - int인 경우:
+            마지막 인덱스 + trg_window 를 단일 target 시점으로 사용.
+            예: trg_window=1 → one-step-ahead 예측.
+        - iterable (길이 2) 인 경우:
+            (low, high) 로 간주하고 [low, ..., high] 범위를 모두 포함하는
+            target window를 사용. (두 값 모두 inclusive)
+            예: trg_window=(1,3) → 마지막 시점 기준 +1, +2, +3 시점을 타깃 구간으로 사용.
+
+    Returns
+    -------
+    filtered_idx : numpy.ndarray, shape (N, 1)
+        유효한 source window에 대해, 각 window의 기준 인덱스
+        (보통 source window의 마지막 시점 인덱스)를 담은 배열.
+
+    filtered_src_idx : numpy.ndarray, shape (N, window_size)
+        trg_window를 만족하는 유효한 source window 인덱스만 남긴 배열.
+
+    filtered_trg_idx : numpy.ndarray, shape (N, T)
+        각 source window에 대응하는 target window 인덱스.
+        여기서 T는 trg_window에 의해 결정되는 target 길이
+        (단일 int인 경우 T=1, (low, high)인 경우 T = high - low + 1).
+
+    Notes
+    -----
+    - 전체 인덱스 범위는 [0, src_idx.max()] 로 가정하고,
+      target window의 모든 인덱스가 이 범위를 벗어나지 않는 경우만 남긴다.
+    - 보통 시계열 예측에서 (입력 window, 출력 window) 쌍을 만들 때
+      source–target 인덱스를 맞추는 용도로 사용된다.
+    """
+    src_idx = np.asarray(src_idx)
+
+    # trg_window 해석: int → 단일 offset, iterable → [low, high] inclusive
+    if hasattr(trg_window, "__iter__") and not isinstance(trg_window, (int, np.integer)):
+        win_low = int(trg_window[0])
+        win_high = int(trg_window[1])   # inclusive
     else:
-        win_low = trg_window
-        win_up = trg_window+1
+        win_low = int(trg_window)
+        win_high = int(trg_window)
 
-    src_last_idx = src_idx[:,-1]
-    # src_last_idx_ = src_idx[:,-1]
-    # src_last_idx = src_last_idx_ +1
-    idx_of_idx = np.arange(len(src_last_idx))
+    offsets = np.arange(win_low, win_high + 1)   # [low, ..., high]
+    src_last_idx = src_idx[:, -1]
 
-    mask = (src_last_idx + win_low >=0) & (src_last_idx + win_up <= src_idx.max()+1)
-    filtered_idx = src_last_idx[mask].reshape(-1,1)
-    filtered_trg_idx = filtered_idx + np.arange(win_low, win_up)
+    min_idx = 0
+    max_idx = src_idx.max()
+
+    # target window의 시작/끝이 전체 인덱스 범위를 벗어나지 않는지 체크
+    mask = (src_last_idx + offsets[0] >= min_idx) & (src_last_idx + offsets[-1] <= max_idx)
+
+    # 기준 인덱스(보통 source window의 마지막 시점)
+    filtered_idx = src_last_idx[mask].reshape(-1, 1)
+
+    # target window 인덱스들
+    filtered_trg_idx = filtered_idx + offsets
+
+    # 유효한 source window 인덱스
     filtered_src_idx = src_idx[mask]
+
     return filtered_idx, filtered_src_idx, filtered_trg_idx
 
 
+# date_data = np.arange(10)   # [0,1,2,3,4,5,6,7,8,9]
+
+# # 1) 길이 3인 source window 만들기
+# src_idx, src_windows = sequential_transform(date_data, window=3, stride=1)
+
+# # 2) 마지막 시점 + 1 을 target으로 쓰기 (one-step-ahead)
+# from_src_idx, filtered_src_idx, filtered_trg_idx = sequential_filter_index_from_src_index(
+#     src_idx, trg_window=1
+# )
+
+# filtered_src_idx
+# filtered_trg_idx
+# for s_idx, t_idx in zip(filtered_src_idx, filtered_trg_idx):
+#     print(f"X idx = {s_idx}, X = {date_data[s_idx]}  -->  y idx = {t_idx}, y = {date_data[t_idx]}")
+
+
+
+
+
 # ------------------------------------------------------------------------------
-# sereis_plot
-def series_plot(data, index=None, columns=None, yscale=None, figsize=(15, 3), return_plot=True):
-    if 'pandas' in str(type(data)).lower():
-        value = np.array(data)
-        if index is None:
-            index = data.index
-        if columns is None:
-            columns = [data.name] if data.ndim == 1 else list(data.columns)
+# sereis_plot : 시계열(또는 여러 개의 시계열 컬럼)을 한 번에 예쁘게 그려주는 helper 함수
+def series_plot(date_time, index=None, columns=None,
+                yscale=None, figsize=(15, 3), return_plot=True):
+    """
+    1개 또는 여러 개의 시계열(Series / DataFrame / numpy 배열)을
+    위아래(subplot)로 나누어 한 번에 선 그래프로 그려주는 함수.
+
+    Parameters
+    ----------
+    date_time : pandas.Series, pandas.DataFrame, or array-like
+        - 시계열 데이터.
+        - Series인 경우: 단일 시계열로 처리되며, name 속성이 있으면 legend label로 사용.
+        - DataFrame인 경우: 각 컬럼을 별도의 subplot에 그린다.
+        - numpy 배열 등 array-like인 경우: shape (N,) 또는 (N, K)를 허용.
+    
+    index : array-like, optional
+        x축에 사용할 인덱스(시간축). 기본값은:
+        - pandas 객체인 경우: 해당 객체의 index
+        - 그 외: 0, 1, 2, ... 의 정수 인덱스
+
+    columns : list of str, optional
+        각 시리즈에 대한 label 목록. 기본값은:
+        - Series: [series.name] 또는 ['series']
+        - DataFrame: list(date_time.columns)
+        - numpy 배열: None (label 없이 그림)
+
+    yscale : {'linear', 'log', ...}, optional
+        y축 스케일. Matplotlib의 set_yscale 옵션과 동일.
+        예: 'linear', 'log', 'symlog', 'logit' 등.
+
+    figsize : tuple, default=(15, 3)
+        전체 figure의 가로, 세로 크기 (단위: inch).
+        세로 크기는 시리즈 개수에 비례해서 자동으로 곱해 사용된다.
+
+    return_plot : bool, default=True
+        - True : Matplotlib Figure 객체를 반환하고, 내부에서 plt.close(fig)를 호출.
+                 (노트북 등에서 수동으로 표시하거나 저장할 때 유용)
+        - False: 즉시 plt.show()로 그림을 화면에 표시하고 None을 반환.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure or None
+        - return_plot=True 인 경우: 생성된 Figure 객체
+        - return_plot=False 인 경우: None
+
+    Notes
+    -----
+    - 여러 컬럼을 가진 시계열을 빠르게 시각적으로 비교할 때 쓸 수 있는 간단한 wrapper.
+    - subplot은 각 시리즈별로 하나씩 생성되며, x축은 공유(sharex=True)한다.
+    - pandas 객체를 넣을 때 별도의 index/columns를 지정하지 않으면 자동으로 가져온다.
+    """
+    # 1) pandas 객체 처리 (Series / DataFrame)
+    if isinstance(date_time, (pd.Series, pd.DataFrame)):
+        if isinstance(date_time, pd.Series):
+            value = date_time.to_numpy().reshape(-1, 1)
+            if index is None:
+                index = date_time.index
+            if columns is None:
+                columns = [date_time.name if date_time.name is not None else "series"]
+        else:  # DataFrame
+            value = date_time.to_numpy()
+            if index is None:
+                index = date_time.index
+            if columns is None:
+                columns = list(date_time.columns)
     else:
-        value = data
-    data_shape = data.shape
-    if return_plot is True:
-        fig = plt.figure(figsize=(figsize[0], figsize[1] * data_shape[1]))    
-    for idx in range(data_shape[1]):
-        plt.subplot(data_shape[1], 1, idx+1)
-        label = None if columns is None else columns[idx]
-        if index is None:
-            plt.plot(value[:,idx], label=label, alpha=0.5)
-        else:
-            plt.plot(index, value[:,idx], label=label, alpha=0.5)
-        plt.legend(bbox_to_anchor=(1,1))
-    if yscale is not None:
-        plt.yscale(yscale)
-    if return_plot is True:
-        plt.close()
+        # pandas가 아니면 그냥 numpy로 변환
+        value = np.asarray(date_time)
+        if value.ndim == 1:
+            value = value.reshape(-1, 1)
+        # index, columns은 사용자가 직접 넣지 않으면 None으로 둠
+
+    n_series = value.shape[1]
+
+    # 2) figure / axes 생성
+    fig, axes = plt.subplots(n_series, 1,
+                            figsize=(figsize[0], figsize[1] * n_series),
+                            sharex=True)
+    
+
+    # axes를 배열 형태로 맞춰주기
+    if not isinstance(axes, np.ndarray):
+        axes = np.array([axes])
+
+    # x축 값
+    if index is None:
+        x = np.arange(value.shape[0])
+    else:
+        x = index
+
+    # 3) 각 시리즈 플롯
+    for i in range(n_series):
+        ax = axes[i]
+        label = None if columns is None else columns[i]
+        ax.plot(x, value[:, i], label=label, alpha=0.5)
+        if label is not None:
+            ax.legend(bbox_to_anchor=(1, 1), loc="upper left")
+        if yscale is not None:
+            ax.set_yscale(yscale)
+
+    plt.tight_layout()
+
+    if return_plot:
+        # 노트북에서 자동 표시를 막고 fig만 리턴할 경우 close
+        plt.close(fig)
         return fig
+    else:
+        # 즉시 화면에 보여주고 아무것도 리턴하지 않음
+        plt.show()
+        
+# (Example1) 30일짜리 랜덤 데이터
+# idx = pd.date_range("2024-01-01", periods=30, freq="D")
+# s = pd.Series(np.random.randn(30).cumsum(), index=idx, name="random_walk")
+
+# series_plot(s, figsize=(12, 3), return_plot=True)
+
+
+# # (Example2) 3개의 시계열 컬럼을 가진 DataFrame
+# df = pd.DataFrame({
+#     "temp": 20 + np.random.randn(30).cumsum(),
+#     "humidity": 50 + np.random.randn(30).cumsum(),
+#     "pressure": 1000 + np.random.randn(30).cumsum()
+# }, index= pd.date_range("2024-01-01", periods=30, freq="D"))
+
+# series_plot(df, figsize=(12, 3), return_plot=True)
 # ------------------------------------------------------------------------------
 
 
-"""
-# example_code
-import sys
-sys.path.append(r'C:\Users\Admin\Desktop\DataScience\★★ DS_Library')
-
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-
-from DS_DeepLearning import shape
-from DS_TimeSeries import series_plot, sequential_transform, sequential_filter_index_from_src_index, 
 
 
-# (example) ---------------------------------------------------------------------
-# https://engineer-mole.tistory.com/239
-# np.put()
-# np.place()
-# np.putmask()
 
-df1 = pd.DataFrame()
-df1['date'] = pd.date_range('2021-01-01', '2021-01-31')
-# df1['date'] = pd.date_range('2021-01-01', '2021-01-10')
-df1['value'] = range(len(df1['date']))
-df1['rand'] = np.random.rand(len(df1['date']))
-df1['target'] = np.arange(len(df1['date']))+100
-# d1['date'] = d1['date'].astype('str').apply(lambda x: x.replace('-',''))
-# ------------------------------------------------------------------------------
 
-y_col = 'target'
-# X_cols = ['value','rand']
-X_cols = ['target']
 
-df_anal = df1.set_index('date')
+# # example_code
+# import sys
+# sys.path.append(r'C:\Users\Admin\Desktop\DataScience\★★ DS_Library')
 
-# series_plot
-series_plot(df_anal)    # Graph
+# import numpy as np
+# import pandas as pd
+# import matplotlib.pyplot as plt
 
-# sequential_transform: Split stacked data ***
-idx1, X_stack = sequential_transform( df_anal[X_cols], window=10)
+# from DS_DeepLearning import shape
+# from DS_TimeSeries import series_plot, sequential_transform, sequential_filter_index_from_src_index
+
+
+# # (example) ---------------------------------------------------------------------
+# # https://engineer-mole.tistory.com/239
+# # np.put()
+# # np.place()
+# # np.putmask()
+
+# df1 = pd.DataFrame()
+# df1['date'] = pd.date_range('2021-01-01', '2021-01-31')
+# # df1['date'] = pd.date_range('2021-01-01', '2021-01-10')
+# df1['value'] = range(len(df1['date']))
+# df1['rand'] = np.random.rand(len(df1['date']))
+# df1['target'] = np.arange(len(df1['date']))+100
+# # d1['date'] = d1['date'].astype('str').apply(lambda x: x.replace('-',''))
+# # ------------------------------------------------------------------------------
+
+# y_col = 'target'
+# # X_cols = ['value','rand']
+# X_cols = ['target']
+
+# df_anal = df1.set_index('date')
+
+# # series_plot
+# series_plot(df_anal, return_plot=False)    # Graph
+
+
+# # sequential_transform: Split stacked data ***
+# idx1, X_stack = sequential_transform( df_anal[X_cols], window=10)
            
-print(shape(idx1), shape(X_stack))   ## (22, 10), (22, 10, 2)
+# print(idx1.shape, X_stack.shape)   ## (22, 10), (22, 10, 2)
 
 
-# sequential_filter_index_from_src_index
-idx2, src_idx, trg_idx = sequential_filter_index_from_src_index(idx1)
-# idx2, src_idx, trg_idx = sequential_filter_index_from_src_index(idx1, trg_window=(-2,2))
-print(idx2.shape, src_idx.shape, trg_idx.shape)
+# # sequential_filter_index_from_src_index
+# # idx2, src_idx, trg_idx = sequential_filter_index_from_src_index(idx1)
+# idx2, src_idx, trg_idx = sequential_filter_index_from_src_index(idx1, trg_window=(-3,3))
+# print(idx2.shape, src_idx.shape, trg_idx.shape)
 
-# data filter
-X = np.array(df_anal[X_cols])[src_idx]
-y = np.array(df_anal[y_col])[trg_idx]
-
-time_index = df_anal.index[idx2]
-time_index_Xmatrix = df_anal.index[src_idx]
-time_index_ymatrix = df_anal.index[trg_idx]
-
-print(X.shape, y.shape, time_index.shape, time_index_Xmatrix.shape, time_index_ymatrix.shape)
-# ((20, 10, 2), (20, 5), (20, 1), (20, 10), (20, 5))
-# pd.DataFrame(X[:,:,0]).to_clipboard(index=False,header=False)
-# pd.DataFrame(y).to_clipboard(index=False,header=False)
-# pd.DataFrame(time_index_ymatrix).to_clipboard(index=False,header=False)
+# # data filter
+# X = np.array(df_anal[X_cols])[src_idx]
+# y = np.array(df_anal[y_col])[trg_idx]
 
 
-# Graph ***
-text_dict = {'0_start':(0,0), '0_end':(0,-1), '-1_start':(-1,0), '-1_end':(-1,-1)}
+# date_index_np = df_anal.index.to_numpy()   # 또는 .values
+# time_index        = date_index_np[idx2.ravel()]   # (N,)
+# time_index_Xmatrix = date_index_np[src_idx]       # (N, window)
+# time_index_ymatrix = date_index_np[trg_idx]       # (N, target_horizon=5
 
-plt.figure(figsize=(15,6))
-plt.subplot(3,1,1)
-plt.plot(df_anal.index, df_anal[y_col], color='mediumseagreen', marker='o')
-plt.plot(time_index_ymatrix[:,0], y[:,0], color='red',alpha=0.5)
-plt.plot(time_index_ymatrix[:,-1], y[:,-1], color='red',alpha=0.5)
-for name, point in text_dict.items():
-    plt.text(time_index_ymatrix[point[0],point[1]], y[point[0], point[1]], f"↓ {name}")
-for e,c in enumerate(df_anal[X_cols].columns):
-    plt.subplot(3,1,e+2)
-    plt.plot(df_anal.index, df_anal[c], color='steelblue', marker='o')
-    plt.plot(time_index, X[:,-1,e], color='gold')
-plt.show()
+# # time_index = df_anal.index[idx2.ravel()]
+# # time_index_Xmatrix = df_anal.index[src_idx]
+# # time_index_ymatrix = df_anal.index[trg_idx]
 
 
-# Train_Test_Split
-from sklearn.model_selection import train_test_split
-test_size = 0.2
-X_train, X_test, y_train, y_test, train_index, test_index = train_test_split(X, y, time_index, test_size=test_size, shuffle=False)
-
-print(X_train.shape, X_test.shape, y_train.shape, y_test.shape, train_index.shape, test_index.shape)
-print(train_index[[0,-1]], test_index[[0, -1]])
-"""
+# print(X.shape, y.shape, time_index.shape, time_index_Xmatrix.shape, time_index_ymatrix.shape)
+# # ((20, 10, 2), (20, 5), (20, 1), (20, 10), (20, 5))
+# # pd.DataFrame(X[:,:,0]).to_clipboard(index=False,header=False)
+# # pd.DataFrame(y).to_clipboard(index=False,header=False)
+# # pd.DataFrame(time_index_ymatrix).to_clipboard(index=False,header=False)
 
 
+# # Graph ***
+# text_dict = {'0_start':(0,0), '0_end':(0,-1), '-1_start':(-1,0), '-1_end':(-1,-1)}
+
+# plt.figure(figsize=(15,8))
+# plt.subplot(3,1,1)
+# plt.plot(df_anal.index, df_anal[y_col], color='mediumseagreen', marker='o')
+# plt.plot(time_index_ymatrix[:,0], y[:,0], color='red',alpha=0.5)
+# plt.plot(time_index_ymatrix[:,-1], y[:,-1], color='red',alpha=0.5)
+# for name, point in text_dict.items():
+#     plt.text(time_index_ymatrix[point[0],point[1]], y[point[0], point[1]], f"↓ {name}")
+# for e,c in enumerate(df_anal[X_cols].columns):
+#     plt.subplot(3,1,e+2)
+#     plt.plot(df_anal.index, df_anal[c], color='steelblue', marker='o')
+#     plt.plot(time_index, X[:,-1,e], color='gold')
+# plt.show()
 
 
+# # Train_Test_Split
+# from sklearn.model_selection import train_test_split
+# test_size = 0.2
+# X_train, X_test, y_train, y_test, train_index, test_index = train_test_split(X, y, time_index, test_size=test_size, shuffle=False)
 
-
-
-
-
+# print(X_train.shape, X_test.shape, y_train.shape, y_test.shape, train_index.shape, test_index.shape)
+# print(train_index[[0,-1]], test_index[[0, -1]])
 
 
 
@@ -272,12 +580,119 @@ print(train_index[[0,-1]], test_index[[0, -1]])
 
 
 
+###########################################################################################################
 
 
 
 
 
 
+
+# 마스킹된 시계열 데이터에 대해 롤링 평균을 적용하여 결측값을 보간하는 함수
+def smoothing(x, mask, window=3, min_periods=1, center=True, agg='mean', **kwargs):
+    """
+    Apply smoothing to masked values in a Pandas Series or DataFrame using a rolling window.
+
+    This function replaces values that do not satisfy the given mask with NaN,
+    computes a rolling aggregation (default: mean) over the masked data, and then
+    interpolates the masked positions with the aggregated values while keeping
+    unmasked positions unchanged.
+
+    Parameters
+    ----------
+    x : pandas.Series or pandas.DataFrame
+        Input data to be smoothed. 
+        (처리할 원본 시계열 데이터)
+    mask : pandas.Series or pandas.DataFrame of bool
+        Boolean mask indicating positions to keep (`True`) and positions to replace (`False`).
+    window : int, default 3
+        Size of the moving window for rolling aggregation.
+    min_periods : int, default 1
+        Minimum number of observations in the window required to have a value.
+    center : bool, default True
+        Set the labels at the center of the window.
+    agg : str, default 'mean'
+        Aggregation function to apply on the rolling window (e.g., 'mean', 'sum', 'max').
+    **kwargs
+        Additional keyword arguments passed to the rolling aggregation.
+
+    Returns
+    -------
+    pandas.Series or pandas.DataFrame
+        Smoothed data with masked positions replaced by rolling aggregated values.
+
+    Notes
+    -----
+    - The function uses `DataFrame.where` to apply the mask and replace non-matching
+      positions with NaN.
+    - Rolling aggregation is applied only to masked positions.
+    - Unmasked positions retain their original values.
+
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> import numpy as np
+    >>> data = pd.Series([1, 2, 10, 4, 5])
+    >>> mask = data < 9
+    >>> smoothing(data, mask, window=3)
+    0    1.0
+    1    2.0
+    2    2.333333
+    3    4.0
+    4    5.0
+    dtype: float64
+    """
+    mask_x = x.where(mask, other=np.nan).rolling(window=window, min_periods=min_periods, center=center, **kwargs).agg(agg)
+    interpolate_x = x.where(mask, other=np.nan).fillna(0) + mask_x.where(~mask, other=np.nan).fillna(0)
+    return interpolate_x
+
+
+
+
+# 서로 다른 길이의 1D 시계열을 최대 길이에 맞춰 padding.
+def pad_series_list_1d(series_list, pad_value=np.nan):
+    """
+    서로 다른 길이의 시계열을 최대 길이에 맞춰 zero padding.
+    Args:
+        series_list (list[np.ndarray]): 각 시계열 (길이 다름)
+        pad_value (float): 패딩값 (기본 0)
+    Returns:
+        np.ndarray: shape = (N, max_len)
+    """
+    max_len = max(len(s) for s in series_list)
+    padded = np.full((len(series_list), max_len), pad_value, dtype=float)
+    for i, s in enumerate(series_list):
+        padded[i, :len(s)] = s
+    return padded
+
+# 서로 다른 길이의 2D 시계열을 최대 길이에 맞춰 padding.
+def pad_series_list_2d(series_list, pad_value=np.nan):
+    """
+    서로 다른 길이의 2D 시계열을 최대 길이에 맞춰 padding.
+    Args:
+        series_list (list[np.ndarray]): 각 시계열 (shape: features × time_length)
+        pad_value (float): 패딩값
+    Returns:
+        np.ndarray: shape = (N, features, max_len)
+    """
+    # features 수는 동일하다고 가정
+    features = series_list[0].shape[0]
+    max_len = max(s.shape[1] for s in series_list)
+    
+    padded = np.full((len(series_list), features, max_len), pad_value, dtype=float)
+    for i, s in enumerate(series_list):
+        padded[i, :, :s.shape[1]] = s
+    return padded
+
+
+
+
+
+
+
+###########################################################################################################
+###########################################################################################################
+###########################################################################################################
 # str → date → number → date → str
 class DatetimeHandler():
     """
@@ -688,20 +1103,72 @@ class DatetimeHandler():
 
 
 
-
+# self_operation : 이전 값에 자기 자신을 누적해서 연산하는 1D 누적 연산 함수 (주로 누적합)
 # @numba.njit
 def self_operation(x, operator='+', init='first'):
-    x_np = np.array(x)
-    result = np.zeros_like(x_np)
-    result[0] = x_np[0] if init == 'first' else init
-    for i in range(1, len(x_np)):
-        result[i] = eval(f'result[i-1] {operator} x_np[i]')
+    """
+    1차원 배열 x에 대해, 앞에서부터 자기 자신과 누적 연산을 수행하는 함수.
+
+    result[0] = x[0] (init='first') 또는 지정한 init 값
+    result[i] = result[i-1] (operator) x[i]
+
+    Parameters
+    ----------
+    x : array-like
+        1차원 입력 데이터.
+
+    operator : {'+','-','*','/'}, default '+'
+        누적에 사용할 이항 연산자.
+
+    init : {'first', scalar}, default 'first'
+        - 'first' : result[0] = x[0] 에서 시작.
+        - 숫자    : result[0] = init 값에서 시작.
+
+    Returns
+    -------
+    result : numpy.ndarray
+        x와 같은 길이의 누적 연산 결과 배열.
+    """
+    x_np = np.asarray(x)
+    if x_np.ndim != 1:
+        x_np = x_np.ravel()
+
+    result = np.empty_like(x_np)
+    if init == 'first':
+        result[0] = x_np[0]
+    else:
+        result[0] = init
+
+    op = operator
+
+    if op == '+':
+        for i in range(1, len(x_np)):
+            result[i] = result[i-1] + x_np[i]
+    elif op == '-':
+        for i in range(1, len(x_np)):
+            result[i] = result[i-1] - x_np[i]
+    elif op == '*':
+        for i in range(1, len(x_np)):
+            result[i] = result[i-1] * x_np[i]
+    elif op == '/':
+        for i in range(1, len(x_np)):
+            result[i] = result[i-1] / x_np[i]
+    else:
+        raise ValueError(f"Unsupported operator: {operator}")
+
     return result
 
+# arr = np.array([1, 0, 0, 1, 0, 1, 1])
+# print("원본:", arr)
+# print("누적합:", self_operation(arr, operator='+'))
 
-# Trend Analysis Class
+
+# Trend Analysis Class : 시계열을 L2(HP filter) / L1 trend filter로 분해하고, trend의 기울기/전환점/구간 그룹을 분석해서 요약해주는 클래스
 class TrendAnalysis():
     """
+    시계열 데이터를 L2(HP filter) 또는 L1 trend filter로 분해하고,
+    추세(trend)의 기울기 및 전환점 정보를 분석하는 클래스.
+    
     【 Required Library 】
     import statsmodels.api as sm  (sm.tsa.filters.hpfilter)
     
@@ -709,6 +1176,84 @@ class TrendAnalysis():
      . lamb=1600 : The Hodrick-Prescott smoothing parameter. 
         (suggesting) month: 129600, quarter: 1600, year: 6.25 
     
+    주요 기능
+    --------
+    1) 필터링
+       - hp_filter (L2): Hodrick-Prescott filter
+         sm.tsa.filters.hpfilter(x, lamb)를 래핑.
+       - L1_filter (L1): 2차 차분(두 번째 미분)에 대한 L1 penalty를 주는
+         trend filtering 문제를 cvxpy로 푸는 형태.
+
+    2) trend_slope
+       - rolling window를 이용해 trend의 시작/끝 평균 차이를 이용한
+         국소 기울기(local slope)를 계산.
+
+    3) trend_info
+       - trend_slope의 부호 변화를 기준으로 각 시점을
+         'up', 'down', 'max', 'min', 'keep' 등으로 라벨링.
+
+    4) trend_group (L1 전용)
+       - trend_slope 변화량이 일정 허용 오차(ptolfloat)를 넘는 지점을
+         trend change point로 보고, 구간별 그룹 번호를 부여.
+       - 각 그룹별 평균 slope 및 특성을 요약 (plus_max, minus_max 등).
+
+    5) fit
+       - 위의 과정들을 한 번에 실행하고, summary DataFrame과
+         그룹별 요약(group_summary) 등을 저장.
+
+    Parameters
+    ----------
+    x : pandas.Series or array-like, optional
+        분석할 시계열 데이터. 보통 pandas.Series를 가정.
+
+    filter : {'hp_filter', 'L2', 'L1'}, default 'hp_filter'
+        사용할 필터 종류.
+        - 'hp_filter', 'L2' : Hodrick-Prescott filter
+        - 'L1'             : L1 trend filter (cvxpy 기반)
+
+    rolling : int, default 2
+        trend_slope 계산 시 rolling window 크기.
+
+    **kwargs :
+        필터 및 내부 메서드에 전달할 추가 파라미터.
+        대표적으로:
+        - lamb : HP filter / L1 filter의 lambda 파라미터.
+
+    Attributes
+    ----------
+    x : pandas.Series
+        입력 시계열 (내부에 저장된 최신 데이터).
+
+    cycle : pandas.Series
+        필터링 결과의 cycle(순환) 성분.
+
+    trend : pandas.Series
+        필터링 결과의 trend(추세) 성분.
+
+    trend_slope_ : pandas.Series
+        rolling window 기반으로 계산된 trend의 국소 기울기.
+
+    trend_info_ : pandas.Series
+        각 시점별 추세 정보 ('up', 'down', 'max', 'min', 'keep' 등).
+
+    trend_change_ : pandas.Series (L1 전용)
+        trend_slope 변화가 기준을 넘는 구간의 change point 마스크 ('point' / NaN).
+
+    trend_group_ : pandas.Series (L1 전용)
+        change point를 기준으로 구간 그룹 번호.
+
+    summary : pandas.DataFrame
+        원 시계열, cycle, trend, trend_slope, trend_info,
+        (필요 시 trend_change, trend_group)를 한 번에 모은 요약 테이블.
+
+    group_summary : pandas.DataFrame (L1 전용)
+        trend_group별 평균 slope와 그에 대한 특성(minus_max, plus_max 등).
+
+    Notes
+    -----
+    - hp_filter 사용 시 statsmodels.api(sm)이 필요하다.
+    - L1_filter 사용 시 cvxpy, scipy.sparse, pandas, numpy 등이 필요하다.
+    - L1 필터는 최적화 문제를 푸는 것이므로 데이터 길이가 길면 계산 비용이 커질 수 있다.
     """
     def __init__(self, x=None, filter='hp_filter', rolling=2, **kwargs):
         self.x = x
@@ -915,3 +1460,74 @@ class TrendAnalysis():
             self.summary.columns = [self.x.name, 'cycle', 'trend', 'trend_slope', 'trend_info']
         return self.summary
 
+
+
+# # 1) 예제 시계열 데이터 생성
+# np.random.seed(0)
+# n = 200
+# idx = pd.date_range("2020-01-01", periods=n, freq="D")
+
+# # 추세 + 순환 + 노이즈
+# trend_true = np.linspace(0, 10, n)
+# cycle_true = 2 * np.sin(np.linspace(0, 4*np.pi, n))
+# noise = np.random.normal(scale=0.5, size=n)
+
+# y = trend_true + cycle_true + noise
+# s = pd.Series(y, index=idx, name="y")
+
+# series_plot(s)
+
+# # 2) TrendAnalysis 객체 생성 (HP filter 사용)
+# ta = TrendAnalysis(x=s, filter='hp_filter', lamb=1600, rolling=5)
+
+# # 3) trend_slope, trend_info, summary 계산
+# summary = ta.fit()   # hp_filter이므로 group은 없음
+
+# print("=== summary head ===")
+# print(summary.head())
+
+# # 4) 결과 시각화 (원 시계열 vs trend)
+# fig, axes = plt.subplots(3, 1, figsize=(12, 8), sharex=True)
+# axes[0].plot(summary.index, summary["y"], label="y", alpha=0.7)
+# axes[0].legend()
+
+# axes[1].plot(summary.index, summary["trend"], label="trend (HP)", color="orange")
+# axes[1].legend()
+
+# axes[2].plot(summary.index, summary["trend_slope"], label="trend_slope", color="green")
+# axes[2].legend()
+
+# plt.tight_layout()
+# plt.show()
+
+
+
+
+# # 1) 동일한 시계열에 대해 L1 filter 사용
+# ta_L1 = TrendAnalysis(x=s, filter='L1', lamb=50, rolling=5)
+
+# summary_L1 = ta_L1.fit(ptolfloat=0.05)   # ptolfloat: slope 변화 허용비율
+
+# print("=== L1 summary head ===")
+# print(summary_L1.head())
+
+# print("\n=== group_summary (L1) ===")
+# print(ta_L1.group_summary)
+
+# # 2) L1 trend + group 시각화
+# fig, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
+
+# axes[0].plot(summary_L1.index, summary_L1["y"], label="y", alpha=0.7)
+# axes[0].legend()
+
+# axes[1].plot(summary_L1.index, summary_L1["trend"], label="trend (L1)", color="orange")
+# axes[1].legend()
+
+# # trend_group을 color bar 형식으로 살짝 시각화
+# axes[2].plot(summary_L1.index, summary_L1["trend_slope"], label="trend_slope", color="green")
+# for t, g in zip(summary_L1.index, summary_L1["trend_group"]):
+#     axes[2].axvline(t, color="gray", alpha=0.05 * g)  # 그룹 번호에 따라 살짝 진하게
+
+# axes[2].legend()
+# plt.tight_layout()
+# plt.show()

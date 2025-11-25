@@ -1,4 +1,6 @@
 from typing import Optional, Tuple
+import inspect
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,6 +31,119 @@ def make_tril_mask(x, pad_idx=0):
 # a[a < 0.3] = 0
 # make_mask(a)      # (10, 5)
 # make_tril_mask(a) # (10, 5, 5)
+
+
+
+
+
+# (Container Block)  ##################################################################################################
+def module_helper_for_kwarg(module, *args, **kwargs):
+    """
+    module.forward의 시그니처를 보고, 사용할 수 있는 kwargs만 골라서 호출
+    사용 예: y = call_with_filtered_kwargs(layer, x, mask=mask, time_mask=time_mask)
+    """
+    sig = inspect.signature(module.forward)
+    param_names = list(sig.parameters.keys())[1:]  # self 제외
+
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in param_names}
+    return module(*args, **filtered_kwargs)
+
+class KwargSequential(nn.Sequential):
+    """
+    A Sequential container that transparently forwards additional keyword arguments
+    (e.g., `mask`, `time_mask`, `scale`, etc.) to submodules **only if** they accept them.
+
+    일반 nn.Sequential과 달리, MultiInputSequential은 forward(x, **kwargs)로 입력받으며,
+    kwargs 내부 인자 이름이 각 submodule.forward()의 signature에 존재하는 경우에만
+    해당 인자를 전달합니다.
+
+    이를 통해 "mask-aware" 모듈(MaskedConv1d, ResidualConnection 등)과
+    일반 모듈(nn.ReLU, nn.BatchNorm1d 등)을 하나의 pipeline 안에서 자연스럽게 혼합하여
+    사용할 수 있습니다.
+
+    Example:
+        seq = KwargSequential(
+            MaskedConv1d(1, 32, kernel_size=5, padding=2),
+            nn.ReLU(),
+            ResidualConnection(
+                KwargSequential(
+                    MaskedConv1d(32, 32, kernel_size=5, padding=2),
+                    nn.BatchNorm1d(32),
+                    nn.ReLU(),
+                )
+            ),
+        )
+
+        out = seq(x, mask=mask)  # mask는 mask-aware 모듈로만 전달됨
+
+    Args:
+        x (Tensor): 주 입력 텐서. Conv1d라면 (B, C, T).
+        **kwargs: 추가 keyword 인자. 필요한 submodule에서만 선택적으로 사용됨.
+
+    Returns:
+        Tensor: 마지막 모듈의 출력.
+    """
+    def forward(self, x, **kwargs):
+        """
+        x : 메인 입력 (Conv1d feature 등)
+        kwargs : mask, time_mask, scale 등 부가 인자들
+        """
+        for module in self:
+            # module.forward의 시그니처를 보고, 받을 수 있는 인자만 필터링
+            sig = inspect.signature(module.forward)
+            param_names = list(sig.parameters.keys())[1:]  # self 제외
+
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in param_names}
+
+            # 해당 모듈이 그 인자를 받는다면 kwargs 전달
+            if filtered_kwargs:
+                x = module(x, **filtered_kwargs)
+            else:
+                x = module(x)
+        return x
+
+
+
+ ####################################################################################################################################
+
+
+
+
+# (Layer for ResidualConnection)  ##################################################################################################
+class ResidualConnection(nn.Module):
+    """
+    A wrapper module that applies a residual skip connection around a given block.
+
+    block(x, **filtered_kwargs) + shortcut(x)
+    형태의 출력을 반환하며, block.forward()가 받을 수 없는 인자는 자동으로 필터링됩니다.
+
+    MultiInputSequential과 함께 사용하면, block이 mask-aware인지 여부와 관계없이
+    동일한 구조로 residual connection을 구성할 수 있습니다.
+
+    Args:
+        block (nn.Module): Residual main branch에 해당하는 모듈.
+        shortcut (Callable, optional): Skip-connection. 기본은 identity(x).
+
+    Example:
+        block = MultiInputSequential(
+            MaskedConv1d(32, 32, 5, padding=2),
+            nn.BatchNorm1d(32),
+            nn.ReLU()
+        )
+        res = ResidualConnection(block)
+        out = res(x, mask=mask)
+    """
+    def __init__(self, block, shortcut=None):
+        super().__init__()
+        self.block = block
+        self.shortcut = shortcut or (lambda x: x)
+    
+    def forward(self, x):
+        return self.block(x) + self.shortcut(x)
+ ####################################################################################################################################
+
+
+
 
 
 
@@ -394,16 +509,6 @@ class LearnablePositionalEncoding(nn.Module):
 
 
 
-# (Layer for ResidualConnection)  ##################################################################################################
-class ResidualConnection(nn.Module):
-    def __init__(self, block, shortcut=None):
-        super().__init__()
-        self.block = block
-        self.shortcut = shortcut or (lambda x: x)
-    
-    def forward(self, x):
-        return self.block(x) + self.shortcut(x)
- ####################################################################################################################################
 
 
 
@@ -427,6 +532,10 @@ class FeatureWiseEmbeddingNorm(nn.Module):
         return self.gamma * x_norm + self.beta
 
  ####################################################################################################################################
+
+
+
+
 
 
 
@@ -1098,3 +1207,106 @@ class AttentionPooling(nn.Module):
         return pooled, attn_weights
 
 ####################################################################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############################################################################################################################
+# 【Layer for TimeSeries】  ##################################################################################################
+############################################################################################################################
+
+
+
+
+# (Layer for MaskedConv1d)  ##################################################################################################
+class MaskedConv1d(nn.Conv1d):
+    """
+    A Conv1d variant that supports **mask-aware convolution** for irregular or padded time-series.
+
+    특징:
+        - 입력 x: (B, C, T)
+        - 마스크 mask: (B, T) 또는 (B, 1, T)
+        - Conv 수행 시 mask된 위치는 x에서 제거되며,
+          실제 기여한 유효 타임스텝 개수로 kernel 윈도우 내 평균을 계산
+        - padding/결측/불규칙 구간이 많은 시계열에서 안정적인 feature 추출 가능
+
+    처리 과정:
+        1) mask를 (B, 1, T)로 정규화
+        2) x_masked = x * mask
+        3) numerator = conv(x_masked)
+        4) denom     = conv(mask, ones_kernel)
+        5) out = numerator / (denom + eps)
+        6) bias 추가 (if exists)
+
+    Args:
+        x (Tensor): (B, C, T)
+        mask (Tensor, optional): (B, T) or (B, 1, T)
+
+    Returns:
+        Tensor: Mask-aware convolution 결과. (B, out_channels, T)
+
+    Example:
+        conv = MaskedConv1d(1, 64, kernel_size=5, padding=2)
+        out = conv(x, mask=mask)
+    """
+    def forward(self, x, mask=None):
+        # x: (B, C, T)
+        # mask: (B, 1, T) or (B, T) or None
+        
+        if mask is None:
+            return super().forward(x)
+
+         # 1) mask를 (B, 1, T)로 정규화
+        if mask.dim() == 2:            # (B, T)
+            mask = mask.unsqueeze(1)   # (B, 1, T)
+        elif mask.dim() == 3:
+            # (B, 1, T)라고 가정, 아니면 에러 내거나 assert
+            assert mask.size(1) == 1, "mask의 채널 차원은 1이어야 합니다."
+        else:
+            raise ValueError(f"Unexpected mask shape: {mask.shape}")
+
+        mask = mask.to(x.dtype)
+        
+        # 2) 유효한 값만 사용
+        x_masked = x * mask          # (B, C, T)
+        numerator = F.conv1d(x_masked, self.weight, bias=None, stride=self.stride, 
+                            padding=self.padding, dilation=self.dilation, groups=self.groups)
+
+        # 3) 마스크도 conv해서 실제로 몇 개가 기여했는지 계산
+        ones_kernel = torch.ones(1, 1, self.kernel_size[0], device=x.device, dtype=x.dtype)
+        
+        denom = F.conv1d(mask, ones_kernel, bias=None, stride=self.stride,
+                        padding=self.padding, dilation=self.dilation, groups=1,)
+
+        # 4) 평균
+        out = numerator / (denom + 1e-8)
+
+        # 4) bias 있으면 마지막에 더해줌
+        if self.bias is not None:
+            out = out + self.bias.view(1, -1, 1)
+
+        return out
+ ####################################################################################################################################
+
+
+
