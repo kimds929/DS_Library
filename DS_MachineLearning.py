@@ -1878,279 +1878,279 @@ class EnsembleModels():
 
 ################################################################################################################
 
-# HyperParameter Tunning
-from bayes_opt import BayesianOptimization, UtilityFunction
+# # HyperParameter Tunning
+# from bayes_opt import BayesianOptimization, UtilityFunction
 
-# (git) bayes_opt : https://github.com/fmfn/BayesianOptimization 
-# (git_advance) bayes_opt : https://github.com/fmfn/BayesianOptimization/blob/master/examples/advanced-tour.ipynb
-# (install) conda install -c conda-forge bayesian-optimization
+# # (git) bayes_opt : https://github.com/fmfn/BayesianOptimization 
+# # (git_advance) bayes_opt : https://github.com/fmfn/BayesianOptimization/blob/master/examples/advanced-tour.ipynb
+# # (install) conda install -c conda-forge bayesian-optimization
 
 
-# from bayes_opt import BayesianOptimization
-# from bayes_opt import UtilityFunction
-class BayesOpt:
-    """
-     【required (Library)】 bayes_opt.BayesianOptimization, bayes_opt.UtilityFunction
-     【required (Custom Module)】 EarlyStopping
+# # from bayes_opt import BayesianOptimization
+# # from bayes_opt import UtilityFunction
+# class BayesOpt:
+#     """
+#      【required (Library)】 bayes_opt.BayesianOptimization, bayes_opt.UtilityFunction
+#      【required (Custom Module)】 EarlyStopping
      
-      . __init__(self, f, pbounds, random_state=None, verbose=2)
-         f : function
-         pbounds : {'x':(-150, 150), 'y':(-50, 100), 'z':(1000, 1200)}
-         random_state : 1, 2, 3...
-         verbose : 1, 2, 3... 
-    """
-    def __init__(self, f, pbounds, random_state=None, verbose=2):
-        self.verbose = verbose
-        self.f = f
-        self.pbounds = pbounds
-        self.random_state = random_state
-        self.random_generate = np.random.RandomState(self.random_state)
+#       . __init__(self, f, pbounds, random_state=None, verbose=2)
+#          f : function
+#          pbounds : {'x':(-150, 150), 'y':(-50, 100), 'z':(1000, 1200)}
+#          random_state : 1, 2, 3...
+#          verbose : 1, 2, 3... 
+#     """
+#     def __init__(self, f, pbounds, random_state=None, verbose=2):
+#         self.verbose = verbose
+#         self.f = f
+#         self.pbounds = pbounds
+#         self.random_state = random_state
+#         self.random_generate = np.random.RandomState(self.random_state)
         
-        self.bayes_opt = BayesianOptimization(f=f, pbounds=pbounds, random_state=random_state, verbose=verbose)
-        self._space = self.bayes_opt._space
+#         self.bayes_opt = BayesianOptimization(f=f, pbounds=pbounds, random_state=random_state, verbose=verbose)
+#         self._space = self.bayes_opt._space
         
-        self.res = []
-        self.max = {'target':-np.inf, 'params':{}}
-        self.repr_max = {}
+#         self.res = []
+#         self.max = {'target':-np.inf, 'params':{}}
+#         self.repr_max = {}
         
-        self.last_state = ''
+#         self.last_state = ''
     
-    def decimal(self, x, rev=0):
-        return 2 if x == 0 else int(-1*(np.floor(np.log10(abs(x)))-3-rev))
+#     def decimal(self, x, rev=0):
+#         return 2 if x == 0 else int(-1*(np.floor(np.log10(abs(x)))-3-rev))
     
-    def auto_decimal(self, x, rev=0):
-        if np.isnan(x):
-            return np.nan
-        else:
-            decimals = self.decimal(x, rev=rev)
-            if decimals < 0:
-                return x
-            else:
-                return round(x, decimals)
+#     def auto_decimal(self, x, rev=0):
+#         if np.isnan(x):
+#             return np.nan
+#         else:
+#             decimals = self.decimal(x, rev=rev)
+#             if decimals < 0:
+#                 return x
+#             else:
+#                 return round(x, decimals)
 
-    def print_result(self):
-        epoch = len(self.bayes_opt._space.target)
-        last_target = self.auto_decimal(self.bayes_opt._space.target[-1])
-        last_params = {k: self.auto_decimal(v) for k, v in zip(self.bayes_opt._space.keys, self.bayes_opt._space.params[-1])}
-        last_state = '**Maximum' if epoch == np.argmax(self.bayes_opt._space.target) + 1 else self.last_state
+#     def print_result(self):
+#         epoch = len(self.bayes_opt._space.target)
+#         last_target = self.auto_decimal(self.bayes_opt._space.target[-1])
+#         last_params = {k: self.auto_decimal(v) for k, v in zip(self.bayes_opt._space.keys, self.bayes_opt._space.params[-1])}
+#         last_state = '**Maximum' if epoch == np.argmax(self.bayes_opt._space.target) + 1 else self.last_state
         
-        if self.verbose > 0:
-            if self.verbose > 1 or last_state == '**Maximum':
-                print(f"{epoch} epoch) target: {last_target}, params: {str(last_params)[:255]} {last_state}")
-        self.last_state = ''
+#         if self.verbose > 0:
+#             if self.verbose > 1 or last_state == '**Maximum':
+#                 print(f"{epoch} epoch) target: {last_target}, params: {str(last_params)[:255]} {last_state}")
+#         self.last_state = ''
     
-    def maximize(self, init_points=5, n_iter=25, acq='ucb', kappa=2.576, xi=0.0, patience=None, **gp_params):
-        if patience is not None:
-            bayes_utils = UtilityFunction(kind=acq, kappa=kappa, xi=xi)
-            n = 1
+#     def maximize(self, init_points=5, n_iter=25, acq='ucb', kappa=2.576, xi=0.0, patience=None, **gp_params):
+#         if patience is not None:
+#             bayes_utils = UtilityFunction(kind=acq, kappa=kappa, xi=xi)
+#             n = 1
             
-            # init_points bayesian
-            for i in range(init_points):
-                self.bayes_opt.probe(self.bayes_opt._space.random_sample(), lazy=False)
-                self.print_result()
-                n += 1
+#             # init_points bayesian
+#             for i in range(init_points):
+#                 self.bayes_opt.probe(self.bayes_opt._space.random_sample(), lazy=False)
+#                 self.print_result()
+#                 n += 1
             
-            # EarlyStop
-            early_stop_instance = EarlyStopping(patience=patience, optimize='maximize')
-            early_stop_instance.early_stop(score=self.bayes_opt.max['target'], save=self.bayes_opt.max['params'])
+#             # EarlyStop
+#             early_stop_instance = EarlyStopping(patience=patience, optimize='maximize')
+#             early_stop_instance.early_stop(score=self.bayes_opt.max['target'], save=self.bayes_opt.max['params'])
             
-            last_state = 'break' if patience == 0 else None
-            while last_state != 'break' or n < n_iter:
-                # Bayesian Step
-                next_points = self.bayes_opt.suggest(bayes_utils)
-                next_target = self.f(**next_points)
-                self.bayes_opt.register(params=next_points, target=next_target)
+#             last_state = 'break' if patience == 0 else None
+#             while last_state != 'break' or n < n_iter:
+#                 # Bayesian Step
+#                 next_points = self.bayes_opt.suggest(bayes_utils)
+#                 next_target = self.f(**next_points)
+#                 self.bayes_opt.register(params=next_points, target=next_target)
             
-                if n >= n_iter:
-                    last_state = early_stop_instance.early_stop(score=next_target, save=next_points)
-                    self.last_state = '' if last_state == 'None' else last_state
+#                 if n >= n_iter:
+#                     last_state = early_stop_instance.early_stop(score=next_target, save=next_points)
+#                     self.last_state = '' if last_state == 'None' else last_state
 
-                self.print_result()
-                n += 1
+#                 self.print_result()
+#                 n += 1
             
-        else:
-            self.bayes_opt.maximize(init_points=init_points, n_iter=n_iter, acq=acq, kappa=kappa, xi=xi, **gp_params)
+#         else:
+#             self.bayes_opt.maximize(init_points=init_points, n_iter=n_iter, acq=acq, kappa=kappa, xi=xi, **gp_params)
         
-        # result            
-        target_auto_format = self.auto_decimal(self.bayes_opt.max['target'])
-        parmas_auto_format = {k: self.auto_decimal(v) for k, v in self.bayes_opt.max['params'].items()}
-        self.repr_max = {'target':target_auto_format, 'params': parmas_auto_format}
+#         # result            
+#         target_auto_format = self.auto_decimal(self.bayes_opt.max['target'])
+#         parmas_auto_format = {k: self.auto_decimal(v) for k, v in self.bayes_opt.max['params'].items()}
+#         self.repr_max = {'target':target_auto_format, 'params': parmas_auto_format}
 
-        self.res = self.bayes_opt.res
-        self.max = self.bayes_opt.max
+#         self.res = self.bayes_opt.res
+#         self.max = self.bayes_opt.max
 
-    def __repr__(self):
-        if len(self.repr_max) > 0:
-            return f"(bayes_opt) BayesianOptimization: {self.repr_max}"
-        else:
-            return f"(bayes_opt) BayesianOptimization: undefined"
+#     def __repr__(self):
+#         if len(self.repr_max) > 0:
+#             return f"(bayes_opt) BayesianOptimization: {self.repr_max}"
+#         else:
+#             return f"(bayes_opt) BayesianOptimization: undefined"
         
 
 
 
 ################################################################################################################
 # print(get_python_lib())
-class EstimatorSearch:
-    """
-     【required (Library)】 bayes_opt.BayesianOptimization, bayes_opt.UtilityFunction
-     【required (Class)】 BayesOpt
-     【required (Function)】auto_formating
+# class EstimatorSearch:
+#     """
+#      【required (Library)】 bayes_opt.BayesianOptimization, bayes_opt.UtilityFunction
+#      【required (Class)】 BayesOpt
+#      【required (Function)】auto_formating
 
-    """
-    def __init__(self, estimator, train_X=None, train_y=None, valid_X=None, valid_y=None, 
-        params={}, params_dtypes={},
-        optim='bayes', optimizer_params={}, optimize_params={},
-        scoring=None, scoring_type='metrics', scoring_params={}, negative_scoring=False,
-        verbose=0
-        ):
-        self.estimator = estimator
+#     """
+#     def __init__(self, estimator, train_X=None, train_y=None, valid_X=None, valid_y=None, 
+#         params={}, params_dtypes={},
+#         optim='bayes', optimizer_params={}, optimize_params={},
+#         scoring=None, scoring_type='metrics', scoring_params={}, negative_scoring=False,
+#         verbose=0
+#         ):
+#         self.estimator = estimator
 
-        self.train_X = train_X
-        self.train_y = train_y
+#         self.train_X = train_X
+#         self.train_y = train_y
 
-        self.valid_X = train_X if valid_X is None else valid_X
-        self.valid_y = train_y if valid_y is None else valid_y
+#         self.valid_X = train_X if valid_X is None else valid_X
+#         self.valid_y = train_y if valid_y is None else valid_y
 
-        self.params = params
-        self.params_dtypes = params_dtypes
-        if verbose>0 and len(params) > 0:
-            print(f"fixed parmas: {params}")
+#         self.params = params
+#         self.params_dtypes = params_dtypes
+#         if verbose>0 and len(params) > 0:
+#             print(f"fixed parmas: {params}")
 
-        self.scoring = scoring
-        self.scoring_type = scoring_type
-        self.scoring_params = scoring_params
-        self.negative_scoring = negative_scoring
+#         self.scoring = scoring
+#         self.scoring_type = scoring_type
+#         self.scoring_params = scoring_params
+#         self.negative_scoring = negative_scoring
 
-        self.optim_method = optim
-        self.optim = None
-        self.optimizer_params = optimizer_params
-        self.optimize_params = optimize_params
+#         self.optim_method = optim
+#         self.optim = None
+#         self.optimizer_params = optimizer_params
+#         self.optimize_params = optimize_params
 
-        self.verbose = verbose
+#         self.verbose = verbose
 
-        self.best_estimator = None
+#         self.best_estimator = None
 
-    def transform_dtype(self, dtype, x):
-        if 'class' in str(dtype).lower():
-            if 'int' in str(dtype).lower():
-                return int(round(x,0))
-            else:
-                return dtype(x)
-        elif type(dtype) == str:
-            if 'int' in dtype.lower():
-                return int(round(x,0))
-            else:
-                return eval(f"{dtype.lower()}({x})") 
+#     def transform_dtype(self, dtype, x):
+#         if 'class' in str(dtype).lower():
+#             if 'int' in str(dtype).lower():
+#                 return int(round(x,0))
+#             else:
+#                 return dtype(x)
+#         elif type(dtype) == str:
+#             if 'int' in dtype.lower():
+#                 return int(round(x,0))
+#             else:
+#                 return eval(f"{dtype.lower()}({x})") 
 
-    def gap_between_pred_true(self, true_y, pred_y):
-        return np.sum((true_y - pred_y)**2) / len(true_y)
+#     def gap_between_pred_true(self, true_y, pred_y):
+#         return np.sum((true_y - pred_y)**2) / len(true_y)
 
-    def __call__(self, **params):
-        if len(self.params_dtypes) > 0:
-            apply_params = {k: (self.transform_dtype(self.params_dtypes[k], v) if k in self.params_dtypes.keys() else v) for k, v in params.items()}
-        else:
-            apply_params = params
-        apply_params.update(self.params)
+#     def __call__(self, **params):
+#         if len(self.params_dtypes) > 0:
+#             apply_params = {k: (self.transform_dtype(self.params_dtypes[k], v) if k in self.params_dtypes.keys() else v) for k, v in params.items()}
+#         else:
+#             apply_params = params
+#         apply_params.update(self.params)
         
-        # print(apply_params)
-        model = self.estimator(**apply_params)
-        model.fit(self.train_X, self.train_y)
-        pred_y = model.predict(self.valid_X)
-        score_result = self.score(y_true=self.valid_y, y_pred=pred_y, X=self.valid_X, y=self.valid_y, estimator=model, **self.scoring_params)
+#         # print(apply_params)
+#         model = self.estimator(**apply_params)
+#         model.fit(self.train_X, self.train_y)
+#         pred_y = model.predict(self.valid_X)
+#         score_result = self.score(y_true=self.valid_y, y_pred=pred_y, X=self.valid_X, y=self.valid_y, estimator=model, **self.scoring_params)
         
-        if self.negative_scoring:
-            return -score_result
-        else:
-            return score_result
+#         if self.negative_scoring:
+#             return -score_result
+#         else:
+#             return score_result
     
-    def optimizer(self, optim='bayes', verbose=None, **optimizer_params):
-        """
-         . bayesian_optimization : pbounds, random_state=None, verbose=2
-        """
-        verbose = self.verbose if verbose is None else verbose
-        if len(optimizer_params) == 0:
-            optimizer_params.update(self.optimizer_params)
+#     def optimizer(self, optim='bayes', verbose=None, **optimizer_params):
+#         """
+#          . bayesian_optimization : pbounds, random_state=None, verbose=2
+#         """
+#         verbose = self.verbose if verbose is None else verbose
+#         if len(optimizer_params) == 0:
+#             optimizer_params.update(self.optimizer_params)
         
-        def optim_params_setting(params_dict, name, init):
-            params_dict[name] = init if name not in optimizer_params.keys() else params_dict[name]
-            return params_dict
+#         def optim_params_setting(params_dict, name, init):
+#             params_dict[name] = init if name not in optimizer_params.keys() else params_dict[name]
+#             return params_dict
 
-        optim_method = self.optim_method if optim is None else optim
-        if 'bayes' in optim_method:
-            self.optim = BayesOpt(f=self.__call__, verbose=verbose, **optimizer_params)
+#         optim_method = self.optim_method if optim is None else optim
+#         if 'bayes' in optim_method:
+#             self.optim = BayesOpt(f=self.__call__, verbose=verbose, **optimizer_params)
 
-        return self
+#         return self
 
-    def optimize(self, **optimize_params):
-        """
-         . bayesian_optimization : init_points=5, n_iter=25, acq='ucb', kappa=2.576, xi=0.0, **gp_params
-        """
-        if len(optimize_params) == 0:
-            optimize_params.update(self.optimize_params)
+#     def optimize(self, **optimize_params):
+#         """
+#          . bayesian_optimization : init_points=5, n_iter=25, acq='ucb', kappa=2.576, xi=0.0, **gp_params
+#         """
+#         if len(optimize_params) == 0:
+#             optimize_params.update(self.optimize_params)
 
-        if 'bayes' in self.optim_method:
-            self.optim.maximize(**optimize_params)
-            self.res = self.optim.res
-            self.opt = self.optim.max
+#         if 'bayes' in self.optim_method:
+#             self.optim.maximize(**optimize_params)
+#             self.res = self.optim.res
+#             self.opt = self.optim.max
 
-            if len(self.params_dtypes) > 0:
-                self.res = [{'target': e['target'], 'params': {k: (self.transform_dtype(self.params_dtypes[k], v) if k in self.params_dtypes.keys() else v) for k, v in e['params'].items()}} for e in self.res]
-                self.opt = {'target': self.opt['target'], 'params': {k: (self.transform_dtype(self.params_dtypes[k], v) if k in self.params_dtypes.keys() else v) for k, v in self.opt['params'].items()}}
+#             if len(self.params_dtypes) > 0:
+#                 self.res = [{'target': e['target'], 'params': {k: (self.transform_dtype(self.params_dtypes[k], v) if k in self.params_dtypes.keys() else v) for k, v in e['params'].items()}} for e in self.res]
+#                 self.opt = {'target': self.opt['target'], 'params': {k: (self.transform_dtype(self.params_dtypes[k], v) if k in self.params_dtypes.keys() else v) for k, v in self.opt['params'].items()}}
 
-        if self.best_estimator is not None:
-            self.best_params = self.params.copy()
-            self.best_params.update(self.opt['params'])
-            self.best_estimator = self.estimator(**self.best_params)
+#         if self.best_estimator is not None:
+#             self.best_params = self.params.copy()
+#             self.best_params.update(self.opt['params'])
+#             self.best_estimator = self.estimator(**self.best_params)
 
-            train_X_overall = pd.concat([self.train_X, self.valid_X], axis=0)
-            train_y_overall = pd.concat([self.train_y, self.valid_y], axis=0)
-            self.best_estimator.fit(train_X_overall, train_y_overall)
-            print(f"(best_estimator is updated) result: {self.opt['target']}, best_params: {self.best_params}")
+#             train_X_overall = pd.concat([self.train_X, self.valid_X], axis=0)
+#             train_y_overall = pd.concat([self.train_y, self.valid_y], axis=0)
+#             self.best_estimator.fit(train_X_overall, train_y_overall)
+#             print(f"(best_estimator is updated) result: {self.opt['target']}, best_params: {self.best_params}")
 
-    def fit(self, train_X=None, train_y=None, valid_X=None, valid_y=None, scoring=None, scoring_type=None, negative_scoring=None, optim=None,
-        verbose=1, optimizer_params={}, optimize_params={}, return_result=True):
-        self.train_X = self.train_X if train_X is None else train_X
-        self.train_y = self.train_y if train_y is None else train_y
-        self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
-        self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
-        self.scoring = self.scoring if scoring is None else scoring
-        self.scoring_type = self.scoring_type if scoring_type is None else scoring_type
-        self.negative_scoring = self.negative_scoring if negative_scoring is None else negative_scoring
-        optimizer_params = self.optimizer_params if len(optimizer_params) == 0 else optimizer_params
-        optimize_params = self.optimize_params if len(optimizer_params) == 0 else optimize_params
+#     def fit(self, train_X=None, train_y=None, valid_X=None, valid_y=None, scoring=None, scoring_type=None, negative_scoring=None, optim=None,
+#         verbose=1, optimizer_params={}, optimize_params={}, return_result=True):
+#         self.train_X = self.train_X if train_X is None else train_X
+#         self.train_y = self.train_y if train_y is None else train_y
+#         self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
+#         self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
+#         self.scoring = self.scoring if scoring is None else scoring
+#         self.scoring_type = self.scoring_type if scoring_type is None else scoring_type
+#         self.negative_scoring = self.negative_scoring if negative_scoring is None else negative_scoring
+#         optimizer_params = self.optimizer_params if len(optimizer_params) == 0 else optimizer_params
+#         optimize_params = self.optimize_params if len(optimizer_params) == 0 else optimize_params
 
 
-        if optim is None:
-            if self.optim is None:
-                optim_method = 'bayes' if self.optim_method is None else self.optim_method
-                self.optimizer(optim=optim_method, **optimizer_params).optimize(**optimize_params)
-        else:
-            optim_method = optim
-            self.optimizer(optim=optim_method, **optimizer_params).optimize(**optimize_params)
+#         if optim is None:
+#             if self.optim is None:
+#                 optim_method = 'bayes' if self.optim_method is None else self.optim_method
+#                 self.optimizer(optim=optim_method, **optimizer_params).optimize(**optimize_params)
+#         else:
+#             optim_method = optim
+#             self.optimizer(optim=optim_method, **optimizer_params).optimize(**optimize_params)
         
-        self.best_params = self.params.copy()
-        self.best_params.update(self.opt['params'])
+#         self.best_params = self.params.copy()
+#         self.best_params.update(self.opt['params'])
 
-        self.best_estimator = self.estimator(**self.best_params)
+#         self.best_estimator = self.estimator(**self.best_params)
 
-        train_X_overall = pd.concat([self.train_X, self.valid_X], axis=0)
-        train_y_overall = pd.concat([self.train_y, self.valid_y], axis=0)
-        self.best_estimator.fit(train_X_overall, train_y_overall)
+#         train_X_overall = pd.concat([self.train_X, self.valid_X], axis=0)
+#         train_y_overall = pd.concat([self.train_y, self.valid_y], axis=0)
+#         self.best_estimator.fit(train_X_overall, train_y_overall)
 
-        if verbose:
-            print(f"(Opimize) result: {self.opt['target']}, best_params: {self.best_params}")
-        if return_result:
-            return self.best_estimator
+#         if verbose:
+#             print(f"(Opimize) result: {self.opt['target']}, best_params: {self.best_params}")
+#         if return_result:
+#             return self.best_estimator
 
-    def score(self, y_true=None, y_pred=None, X=None, y=None, estimator=None, **scoring_params):
-        if 'metric' in self.scoring_type.lower() :
-            if self.scoring is None:
-                self.scoring = self.gap_between_pred_true
-            result = self.scoring(y_true, y_pred)
+#     def score(self, y_true=None, y_pred=None, X=None, y=None, estimator=None, **scoring_params):
+#         if 'metric' in self.scoring_type.lower() :
+#             if self.scoring is None:
+#                 self.scoring = self.gap_between_pred_true
+#             result = self.scoring(y_true, y_pred)
 
-        elif 'cross_val' in self.scoring_type.lower():
-            result = np.mean(cross_val_score(estimator=estimator, X=X, y=y, scoring=self.scoring, **scoring_params))
-        return result
+#         elif 'cross_val' in self.scoring_type.lower():
+#             result = np.mean(cross_val_score(estimator=estimator, X=X, y=y, scoring=self.scoring, **scoring_params))
+#         return result
 
 
 
@@ -2788,259 +2788,259 @@ class FeatureInfluence():
 
 
 
-################################################################################################################
-class BestEstimatorSearch:
-    """
-     【required (Library)】numpy, pandas, bayes_opt.BayesianOptimization, bayes_opt.UtilityFunction, 
-                           copy.deepcopy, itertools.combinations
-     【required (Class)】 BayesOpt, EstimatorSearch, ModelEvaluate
-     【required (Function)】 auto_formating, print_DataFrame
+# ################################################################################################################
+# class BestEstimatorSearch:
+#     """
+#      【required (Library)】numpy, pandas, bayes_opt.BayesianOptimization, bayes_opt.UtilityFunction, 
+#                            copy.deepcopy, itertools.combinations
+#      【required (Class)】 BayesOpt, EstimatorSearch, ModelEvaluate
+#      【required (Function)】 auto_formating, print_DataFrame
 
 
-     < Result Guidance by method>
-      (init) estimators, metrics, scoring_option, train_X, train_y, valid_X, valid_y, test_X, test_y
+#      < Result Guidance by method>
+#       (init) estimators, metrics, scoring_option, train_X, train_y, valid_X, valid_y, test_X, test_y
 
-      (fit) train_X, train_y, valid_X, valid_y, test_X, test_y, verbose
-        → self.estimators
+#       (fit) train_X, train_y, valid_X, valid_y, test_X, test_y, verbose
+#         → self.estimators
 
-      (emsemble) weights, sorting, verbose
-        → self.ensemble_result
-        → self.best_ensemble
-        → self.best_ensemble_estimator
+#       (emsemble) weights, sorting, verbose
+#         → self.ensemble_result
+#         → self.best_ensemble
+#         → self.best_ensemble_estimator
 
-      (ensemble_summary) best_estimator, n_points, encoder, encoderX, encoderY, verbose
-        → self.summary_table
-        → self.summary_plot
-    """
+#       (ensemble_summary) best_estimator, n_points, encoder, encoderX, encoderY, verbose
+#         → self.summary_table
+#         → self.summary_plot
+#     """
     
-    def __init__(self, estimators={'LS':('linear', Lasso, {'random_state':0}, {'optimizer_params':{'pbounds': {'alpha':(0.0001,100)}, 'random_state':0}} )}, 
-        metrics={'r2_adj': 'r2_adj', 'rmse': 'rmse'}, 
-        scoring_option={'scoring':'neg_mean_squared_error', 'scoring_type':'cross_val_score'},
-        train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None):
-        """
-        estimators = {'estimator_name':('linear', 'estimator', 'parmas', 'optimizer_params') ...}
-        metrics = ['metric1', 'metric2']
-        """
-        self.estimators_params = estimators
-        self.metrics = metrics
-        self.scoring_option = scoring_option
+#     def __init__(self, estimators={'LS':('linear', Lasso, {'random_state':0}, {'optimizer_params':{'pbounds': {'alpha':(0.0001,100)}, 'random_state':0}} )}, 
+#         metrics={'r2_adj': 'r2_adj', 'rmse': 'rmse'}, 
+#         scoring_option={'scoring':'neg_mean_squared_error', 'scoring_type':'cross_val_score'},
+#         train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None):
+#         """
+#         estimators = {'estimator_name':('linear', 'estimator', 'parmas', 'optimizer_params') ...}
+#         metrics = ['metric1', 'metric2']
+#         """
+#         self.estimators_params = estimators
+#         self.metrics = metrics
+#         self.scoring_option = scoring_option
 
-        self.train_X = train_X
-        self.train_y = train_y
-        self.valid_X = valid_X
-        self.valid_y = valid_y
-        self.test_X = test_X
-        self.test_y = test_y
+#         self.train_X = train_X
+#         self.train_y = train_y
+#         self.valid_X = valid_X
+#         self.valid_y = valid_y
+#         self.test_X = test_X
+#         self.test_y = test_y
 
-        self.estimators = None
-        self.ensemble_result = None
-        self.feature_influence = None
+#         self.estimators = None
+#         self.ensemble_result = None
+#         self.feature_influence = None
 
-    def fit(self, train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None, verbose=1):
-        self.train_X = self.train_X if train_X is None else train_X
-        self.train_y = self.train_y if train_y is None else train_y
-        self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
-        self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
-        self.test_X = (self.train_X if self.test_X is None else self.test_X) if test_X is None else test_X
-        self.test_y = (self.train_y if self.test_y is None else self.test_y) if test_y is None else test_y
+#     def fit(self, train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None, verbose=1):
+#         self.train_X = self.train_X if train_X is None else train_X
+#         self.train_y = self.train_y if train_y is None else train_y
+#         self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
+#         self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
+#         self.test_X = (self.train_X if self.test_X is None else self.test_X) if test_X is None else test_X
+#         self.test_y = (self.train_y if self.test_y is None else self.test_y) if test_y is None else test_y
 
-        models = {}
-        for en, ev in self.estimators_params.items():
-            models[en] = {}
-            if verbose > 0:
-                print(f"【 {en} model fitting 】", end=' ')
+#         models = {}
+#         for en, ev in self.estimators_params.items():
+#             models[en] = {}
+#             if verbose > 0:
+#                 print(f"【 {en} model fitting 】", end=' ')
 
-            if 'verbose' not in ev[3].keys():
-                ev[3].update({'verbose':0})
+#             if 'verbose' not in ev[3].keys():
+#                 ev[3].update({'verbose':0})
             
-            # optimize model
-            ms_otim = EstimatorSearch(estimator=ev[1], params=ev[2], **ev[3], **self.scoring_option)
-            ms_otim.fit(train_X=self.train_X, train_y=self.train_y, valid_X=self.valid_X, valid_y=self.valid_y, verbose=0, return_result=False)
+#             # optimize model
+#             ms_otim = EstimatorSearch(estimator=ev[1], params=ev[2], **ev[3], **self.scoring_option)
+#             ms_otim.fit(train_X=self.train_X, train_y=self.train_y, valid_X=self.valid_X, valid_y=self.valid_y, verbose=0, return_result=False)
             
-            pred_y = ms_otim.best_estimator.predict(self.test_X)
+#             pred_y = ms_otim.best_estimator.predict(self.test_X)
 
-            # metric model
-            ms_me = ModelEvaluate(self.test_X, self.test_y, model=ms_otim.best_estimator, verbose=0)
-            ms_metric = {}
-            for mk, mv in self.metrics.items():
-                try:
-                    ms_metric[mk] = eval(f'ms_me.{mv}')
-                except:
-                    ms_metric[mk] = mv(self.test_y, pred_y)
-            ms_metric_str = ', '.join([f"{k}: {auto_formating(v)}" for k,v in ms_metric.items()])
+#             # metric model
+#             ms_me = ModelEvaluate(self.test_X, self.test_y, model=ms_otim.best_estimator, verbose=0)
+#             ms_metric = {}
+#             for mk, mv in self.metrics.items():
+#                 try:
+#                     ms_metric[mk] = eval(f'ms_me.{mv}')
+#                 except:
+#                     ms_metric[mk] = mv(self.test_y, pred_y)
+#             ms_metric_str = ', '.join([f"{k}: {auto_formating(v)}" for k,v in ms_metric.items()])
 
-            # plotting model
-            ms_plot = plt.figure(figsize=(5, self.train_X.shape[1]*0.13+2))
-            plt.title(f"{en}\n{ms_metric_str}")
-            if 'linear' in ev[0]:
-                pd.Series(ms_otim.best_estimator.coef_, index=self.train_X.columns).sort_values().plot.barh()
-            elif ('ensemble' in ev[0]) and ('tree' in ev[0]):
-                pd.Series(ms_otim.best_estimator.feature_importances_, index=self.train_X.columns).sort_values().plot.barh()
-            plt.close()
+#             # plotting model
+#             ms_plot = plt.figure(figsize=(5, self.train_X.shape[1]*0.13+2))
+#             plt.title(f"{en}\n{ms_metric_str}")
+#             if 'linear' in ev[0]:
+#                 pd.Series(ms_otim.best_estimator.coef_, index=self.train_X.columns).sort_values().plot.barh()
+#             elif ('ensemble' in ev[0]) and ('tree' in ev[0]):
+#                 pd.Series(ms_otim.best_estimator.feature_importances_, index=self.train_X.columns).sort_values().plot.barh()
+#             plt.close()
 
-            models[en]['estimator'] = copy.deepcopy(ms_otim.best_estimator)
-            models[en]['evaluate'] = dict(ms_me.metrics._asdict())
-            models[en]['metric'] = ms_metric
-            models[en]['plot'] = ms_plot
-            if verbose > 0:
-                print(f"   (estimator) {ms_otim.best_estimator}\n   (metric) {ms_metric_str} ***")
+#             models[en]['estimator'] = copy.deepcopy(ms_otim.best_estimator)
+#             models[en]['evaluate'] = dict(ms_me.metrics._asdict())
+#             models[en]['metric'] = ms_metric
+#             models[en]['plot'] = ms_plot
+#             if verbose > 0:
+#                 print(f"   (estimator) {ms_otim.best_estimator}\n   (metric) {ms_metric_str} ***")
         
-        self.estimators = models
-        if verbose > 0:
-            print('='*100)
-            print('done. → (result) self.estimators')
+#         self.estimators = models
+#         if verbose > 0:
+#             print('='*100)
+#             print('done. → (result) self.estimators')
         
-        return self
+#         return self
 
-    def ensemble(self, train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None,
-        estimators=None, weights=None, sorting='auto', verbose=1):
+#     def ensemble(self, train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None,
+#         estimators=None, weights=None, sorting='auto', verbose=1):
 
-        self.train_X = self.train_X if train_X is None else train_X
-        self.train_y = self.train_y if train_y is None else train_y
-        self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
-        self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
-        self.test_X = (self.train_X if self.test_X is None else self.test_X) if test_X is None else test_X
-        self.test_y = (self.train_y if self.test_y is None else self.test_y) if test_y is None else test_y
+#         self.train_X = self.train_X if train_X is None else train_X
+#         self.train_y = self.train_y if train_y is None else train_y
+#         self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
+#         self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
+#         self.test_X = (self.train_X if self.test_X is None else self.test_X) if test_X is None else test_X
+#         self.test_y = (self.train_y if self.test_y is None else self.test_y) if test_y is None else test_y
 
-        if self.estimators is None:
-            self.fit(verbose=0)
+#         if self.estimators is None:
+#             self.fit(verbose=0)
 
-        models = {en: ev['estimator'] for en, ev in self.estimators.items()} if estimators is None else estimators
-        weights = {en: 1/ev['evaluate']['rmse'] for en, ev in self.estimators.items()} if weights is None else weights
+#         models = {en: ev['estimator'] for en, ev in self.estimators.items()} if estimators is None else estimators
+#         weights = {en: 1/ev['evaluate']['rmse'] for en, ev in self.estimators.items()} if weights is None else weights
 
-        # models combinations
-        estimators = {}
-        estimators_weights = {}       
+#         # models combinations
+#         estimators = {}
+#         estimators_weights = {}       
 
-        count = len(models) + 1
-        for n in range(2, len(models)+1):
-            comb_mdl_name = list(combinations(models.keys(), n))
-            comb_mdl_models = list(combinations(models.values(), n))
-            comb_mdl_weights = list(combinations(weights.values(), n))
+#         count = len(models) + 1
+#         for n in range(2, len(models)+1):
+#             comb_mdl_name = list(combinations(models.keys(), n))
+#             comb_mdl_models = list(combinations(models.values(), n))
+#             comb_mdl_weights = list(combinations(weights.values(), n))
 
-            for name, model, weight in zip(comb_mdl_name, comb_mdl_models, comb_mdl_weights):
-                estimators[f'M{count:03}'] = [(mn, mm) for mn, mm in zip(name, model)]
-                estimators_weights[f'M{count:03}'] = list(weight)
-                count += 1
-        estimators_comb_series = pd.Series({k: [e[0] for e in v] for k, v in estimators.items()}, name='estimators_comb')
+#             for name, model, weight in zip(comb_mdl_name, comb_mdl_models, comb_mdl_weights):
+#                 estimators[f'M{count:03}'] = [(mn, mm) for mn, mm in zip(name, model)]
+#                 estimators_weights[f'M{count:03}'] = list(weight)
+#                 count += 1
+#         estimators_comb_series = pd.Series({k: [e[0] for e in v] for k, v in estimators.items()}, name='estimators_comb')
 
-        # basic estimators
-        basic_estimator_idxs = [f"M{n:03}" for n in np.arange(1, len(models)+1)]
-        basic_summary_dict = {}
-        for e, (en, mdl) in zip(basic_estimator_idxs, models.items()):
-            if verbose > 0:
-                print(f"< {e} : {en} >")
+#         # basic estimators
+#         basic_estimator_idxs = [f"M{n:03}" for n in np.arange(1, len(models)+1)]
+#         basic_summary_dict = {}
+#         for e, (en, mdl) in zip(basic_estimator_idxs, models.items()):
+#             if verbose > 0:
+#                 print(f"< {e} : {en} >")
 
-            basic_me = ModelEvaluate(self.test_X, self.test_y, model=mdl, verbose=verbose)
-            basic_metric = dict(basic_me.metrics._asdict())
+#             basic_me = ModelEvaluate(self.test_X, self.test_y, model=mdl, verbose=verbose)
+#             basic_metric = dict(basic_me.metrics._asdict())
 
-            basic_summary_dict[e] = {'estimators_comb':en, **basic_metric, 'ensemble_estimators':mdl}
-        basic_score_frame = pd.DataFrame(basic_summary_dict).T
+#             basic_summary_dict[e] = {'estimators_comb':en, **basic_metric, 'ensemble_estimators':mdl}
+#         basic_score_frame = pd.DataFrame(basic_summary_dict).T
         
-        # votting
-        votting_models = {}
-        votting_socres = {}
-        for i, (en, e) in enumerate(zip(estimators_comb_series, estimators)):
-            if verbose > 0:
-                print(f"< {e} : {', '.join(en)} >")
+#         # votting
+#         votting_models = {}
+#         votting_socres = {}
+#         for i, (en, e) in enumerate(zip(estimators_comb_series, estimators)):
+#             if verbose > 0:
+#                 print(f"< {e} : {', '.join(en)} >")
             
-            VR = VotingRegressor(estimators=estimators[e], weights=estimators_weights[e])
-            VR.fit(self.train_X, self.train_y)
-            pred_y = VR.predict(self.train_X)
+#             VR = VotingRegressor(estimators=estimators[e], weights=estimators_weights[e])
+#             VR.fit(self.train_X, self.train_y)
+#             pred_y = VR.predict(self.train_X)
             
-            VR_me = ModelEvaluate(self.test_X, self.test_y, model=VR, verbose=verbose)
+#             VR_me = ModelEvaluate(self.test_X, self.test_y, model=VR, verbose=verbose)
 
-            # votting_metric = {}
-            # for mk, mv in self.metrics.items():
-            #     try:
-            #         votting_metric[mk] = eval(f'VR_me.{mv}')
-            #     except:
-            #         votting_metric[mk] = mv(self.test_y, pred_y)
-            votting_metric = dict(VR_me.metrics._asdict())
+#             # votting_metric = {}
+#             # for mk, mv in self.metrics.items():
+#             #     try:
+#             #         votting_metric[mk] = eval(f'VR_me.{mv}')
+#             #     except:
+#             #         votting_metric[mk] = mv(self.test_y, pred_y)
+#             votting_metric = dict(VR_me.metrics._asdict())
 
-            votting_models[e] = copy.deepcopy(VR)
-            votting_socres[e] = votting_metric
+#             votting_models[e] = copy.deepcopy(VR)
+#             votting_socres[e] = votting_metric
 
-        estimators_series = pd.Series(votting_models, name='ensemble_estimators')
+#         estimators_series = pd.Series(votting_models, name='ensemble_estimators')
 
-        votting_scores_frame = pd.DataFrame(votting_socres)
-        votting_scores_frame = pd.concat([estimators_comb_series.to_frame().T, votting_scores_frame, estimators_series.to_frame().T], axis=0)
-        votting_scores_frame = votting_scores_frame.T
+#         votting_scores_frame = pd.DataFrame(votting_socres)
+#         votting_scores_frame = pd.concat([estimators_comb_series.to_frame().T, votting_scores_frame, estimators_series.to_frame().T], axis=0)
+#         votting_scores_frame = votting_scores_frame.T
 
-        # concat result (basics ↔ combinations)
-        votting_scores_frame = pd.concat([basic_score_frame, votting_scores_frame], axis=0)
+#         # concat result (basics ↔ combinations)
+#         votting_scores_frame = pd.concat([basic_score_frame, votting_scores_frame], axis=0)
 
-        # sorting
-        if sorting == 'auto' or sorting is None:
-            ensemble_sort = votting_scores_frame.copy()
-            ensemble_sort.insert(ensemble_sort.shape[1]-1, 'ensemble_score', ensemble_sort['rmse'] * (1-ensemble_sort['r2_score']) * (1-ensemble_sort['mape']), True)
-            # ensemble_sort['ensemble_score'] = ensemble_sort['rmse'] * (1-ensemble_sort['r2_score'])
-            ensemble_sort.sort_values('ensemble_score', axis=0, inplace=True)
+#         # sorting
+#         if sorting == 'auto' or sorting is None:
+#             ensemble_sort = votting_scores_frame.copy()
+#             ensemble_sort.insert(ensemble_sort.shape[1]-1, 'ensemble_score', ensemble_sort['rmse'] * (1-ensemble_sort['r2_score']) * (1-ensemble_sort['mape']), True)
+#             # ensemble_sort['ensemble_score'] = ensemble_sort['rmse'] * (1-ensemble_sort['r2_score'])
+#             ensemble_sort.sort_values('ensemble_score', axis=0, inplace=True)
             
-            if sorting == 'auto':
-                votting_scores_frame = ensemble_sort.copy()
-        else:
-            ensemble_sort = votting_scores_frame.copy()
-            ensemble_sort.sort_values(sorting, axis=0, inplace=True)
-            votting_scores_frame = ensemble_sort.copy()
+#             if sorting == 'auto':
+#                 votting_scores_frame = ensemble_sort.copy()
+#         else:
+#             ensemble_sort = votting_scores_frame.copy()
+#             ensemble_sort.sort_values(sorting, axis=0, inplace=True)
+#             votting_scores_frame = ensemble_sort.copy()
 
-        self.ensemble_result = votting_scores_frame
-        self.best_ensemble = ensemble_sort.iloc[0, :]
-        self.best_ensemble_estimator = self.best_ensemble['ensemble_estimators']
+#         self.ensemble_result = votting_scores_frame
+#         self.best_ensemble = ensemble_sort.iloc[0, :]
+#         self.best_ensemble_estimator = self.best_ensemble['ensemble_estimators']
 
-        if verbose > 0:
-            print()
-            print(f"done.")
-            print(f"→ (ensemble_result) self.ensemble_result")
-            print(f"  (best_ensemble) self.best_ensemble")
-            print(f"  (best_ensemble_estimator) self.best_ensemble_estimator")
-            print_DataFrame(ensemble_sort)
+#         if verbose > 0:
+#             print()
+#             print(f"done.")
+#             print(f"→ (ensemble_result) self.ensemble_result")
+#             print(f"  (best_ensemble) self.best_ensemble")
+#             print(f"  (best_ensemble_estimator) self.best_ensemble_estimator")
+#             print_DataFrame(ensemble_sort)
         
-        return self
+#         return self
 
-    def ensemble_summary(self, train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None,
-            best_estimator=None, n_points=50,
-            encoder=None, encoderX=None, encoderY=None, verbose=1):
+#     def ensemble_summary(self, train_X=None, train_y=None, valid_X=None, valid_y=None, test_X=None, test_y=None,
+#             best_estimator=None, n_points=50,
+#             encoder=None, encoderX=None, encoderY=None, verbose=1):
         
-        self.train_X = self.train_X if train_X is None else train_X
-        self.train_y = self.train_y if train_y is None else train_y
-        self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
-        self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
-        self.test_X = (self.train_X if self.test_X is None else self.test_X) if test_X is None else test_X
-        self.test_y = (self.train_y if self.test_y is None else self.test_y) if test_y is None else test_y
+#         self.train_X = self.train_X if train_X is None else train_X
+#         self.train_y = self.train_y if train_y is None else train_y
+#         self.valid_X = (self.train_X if self.valid_X is None else self.valid_X) if valid_X is None else valid_X
+#         self.valid_y = (self.train_y if self.valid_y is None else self.valid_y) if valid_y is None else valid_y
+#         self.test_X = (self.train_X if self.test_X is None else self.test_X) if test_X is None else test_X
+#         self.test_y = (self.train_y if self.test_y is None else self.test_y) if test_y is None else test_y
 
-        if self.estimators is None:
-            self.fit(verbose=0)
-        if self.ensemble_result is None:
-            self.ensemble(verbose=0)
+#         if self.estimators is None:
+#             self.fit(verbose=0)
+#         if self.ensemble_result is None:
+#             self.ensemble(verbose=0)
 
-        if encoderX is not None:
-            train_X = encoderX.inverse_transform(self.train_X)
-        elif encoder is not None:
-            train_X = encoderX.inverse_transform(self.train_X)
-        else:
-            train_X = self.train_X
+#         if encoderX is not None:
+#             train_X = encoderX.inverse_transform(self.train_X)
+#         elif encoder is not None:
+#             train_X = encoderX.inverse_transform(self.train_X)
+#         else:
+#             train_X = self.train_X
         
-        if best_estimator is None:
-            best_estimator = self.best_ensemble_estimator
+#         if best_estimator is None:
+#             best_estimator = self.best_ensemble_estimator
 
-        feature_influence = FeatureInfluence(train_X=train_X, estimator=best_estimator, 
-                    encoder=encoder, encoderX=encoderX, encoderY=encoderY,
-                    n_points=n_points)
+#         feature_influence = FeatureInfluence(train_X=train_X, estimator=best_estimator, 
+#                     encoder=encoder, encoderX=encoderX, encoderY=encoderY,
+#                     n_points=n_points)
 
-        summary_table = True if verbose > 0 else False
-        summary_plot = True if verbose > 0 else False
-        feature_influence.influence_summary(summary_table=summary_table, summary_plot=summary_plot)
+#         summary_table = True if verbose > 0 else False
+#         summary_plot = True if verbose > 0 else False
+#         feature_influence.influence_summary(summary_table=summary_table, summary_plot=summary_plot)
 
-        self.feature_influence = feature_influence
-        self.summary_table = feature_influence.summary_table
-        self.summary_plot = feature_influence.summary_plot
+#         self.feature_influence = feature_influence
+#         self.summary_table = feature_influence.summary_table
+#         self.summary_plot = feature_influence.summary_plot
 
-        if verbose > 0:
-            print()
-            print(f"done.")
-            print(f"  (summary_table) self.summary_table")
-            print(f"  (summary_plots) self.summary_plot")
+#         if verbose > 0:
+#             print()
+#             print(f"done.")
+#             print(f"  (summary_table) self.summary_table")
+#             print(f"  (summary_plots) self.summary_plot")
 
 
 ################################################################################################################
