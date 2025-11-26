@@ -1297,7 +1297,7 @@ class DataPreprocessing:
         shuffle=True,
         stratify=None,
         **kwargs,
-    ):
+        ):
         """
         Args:
             *data_args : (X, y, ...) 처럼 샘플 차원을 공유하는 데이터들
@@ -1398,7 +1398,7 @@ class DataPreprocessing:
             raise ValueError("split_size must have length 2 or 3.")
 
     # ------------------------------------------------------------------
-    # 전/후처리 훅
+    # 전처리 훅
     # ------------------------------------------------------------------
     def apply_preprocess_before_split(self, pre_split_fn):
         """
@@ -1461,7 +1461,7 @@ class DataPreprocessing:
         shuffle=None,
         stratify=None,
         verbose=0,
-    ):
+        ):
         """
         데이터를 train/valid/test 로 분할.
 
@@ -1676,7 +1676,7 @@ class DataPreprocessing:
         verbose=0,
         pre_split_fn=None,
         pre_encoding_fn=None,
-    ):
+        ):
         """
         pre_split → split → post_split → encoding 전체 수행.
         """
@@ -1712,7 +1712,7 @@ class DataPreprocessing:
         pre_split_fn=None,
         pre_encoding_fn=None,
         **kwargs,
-    ):
+        ):
         """
         pre_split → split → post_split → encoding → TensorDataset → DataLoader
         전체 파이프라인 한 번에 수행.
