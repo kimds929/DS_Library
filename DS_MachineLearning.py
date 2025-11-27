@@ -812,6 +812,7 @@ class DataPreprocessing:
         if len(data_args) > 0:
             lengths = [len(d) for d in data_args]
             assert len(set(lengths)) == 1, "Arguments must have same length in the first dimension"
+            self.features_names = []
 
         # 입력 데이터를 numpy 배열로 통일
         self.np_data = tuple(self._to_numpy(data) for data in data_args)
@@ -859,8 +860,6 @@ class DataPreprocessing:
         """
         DataFrame, Series, torch.Tensor 등 다양한 입력을 numpy로 통일.
         """
-        import pandas as pd
-
         if isinstance(data, torch.Tensor):
             return data.detach().cpu().numpy()
         if isinstance(data, (pd.DataFrame, pd.Series)):
@@ -893,7 +892,7 @@ class DataPreprocessing:
     # ------------------------------------------------------------------
     # 전처리 훅
     # ------------------------------------------------------------------
-    def apply_preprocess_before_split(self, pre_split_fn):
+    def pre_split(self, pre_split_fn):
         """
         split 이전 전체 데이터(np_data)에 대한 전처리.
 
@@ -915,7 +914,7 @@ class DataPreprocessing:
         # 데이터 길이가 바뀌었을 수 있으므로 full_index 재생성
         self.full_index = np.arange(len(self.np_data[0]))
 
-    def apply_preprocess_before_encoding(self, pre_encoding_fn):
+    def pre_encoding(self, pre_encoding_fn):
         """
         split 이후 split_data에 대한 encoding process이전의 전처리.
 
@@ -942,6 +941,34 @@ class DataPreprocessing:
 
             new_tuple = fn(*data_tuple)
             self.split_data[split_name] = tuple(new_tuple)
+            
+    def pre_tensor_dataset(self, pre_tensor_dataset_fn):
+        """
+        split 이후 split_data에 대한 encoding process이전의 전처리.
+
+        pre_tensor_dataset_fn:
+            - callable: encoding 이후 모든 split(train/valid/test)에 동일 적용
+            - dict: {'train': fn_train, 'valid': fn_valid, 'test': fn_test}
+                    각 split별로 다른 함수 적용 가능
+
+        각 fn은 (*data_tuple) -> tuple(data_tuple_like) 형태여야 함.
+        """
+        if pre_tensor_dataset_fn is None or len(self.transformed_data) == 0:
+            return
+
+        for split_name, data_tuple in self.transformed_data.items():
+            if callable(pre_tensor_dataset_fn):
+                fn = pre_tensor_dataset_fn
+            elif isinstance(pre_tensor_dataset_fn, dict):
+                fn = pre_tensor_dataset_fn.get(split_name, None)
+            else:
+                raise ValueError("pre_tensor_dataset_fn must be callable or dict of callables.")
+
+            if fn is None:
+                continue
+
+            new_tuple = fn(*data_tuple)
+            self.transformed_data[split_name] = tuple(new_tuple)
 
     # ------------------------------------------------------------------
     # Split
@@ -1175,7 +1202,7 @@ class DataPreprocessing:
         """
         # 1) pre-split 전처리
         if pre_split_fn is not None:
-            self.apply_preprocess_before_split(pre_split_fn)
+            self.pre_split(pre_split_fn)
 
         # 2) split
         self.split(
@@ -1188,7 +1215,7 @@ class DataPreprocessing:
 
         # 3) post-split 전처리
         if pre_encoding_fn is not None:
-            self.apply_preprocess_before_encoding(pre_encoding_fn)
+            self.pre_encoding(pre_encoding_fn)
 
         # 4) encoding
         return self.encoding(encoder=encoder)
@@ -1204,6 +1231,7 @@ class DataPreprocessing:
         verbose=0,
         pre_split_fn=None,
         pre_encoding_fn=None,
+        pre_tensor_dataset_fn=None,
         **kwargs,
         ):
         """
@@ -1220,6 +1248,11 @@ class DataPreprocessing:
             pre_split_fn=pre_split_fn,
             pre_encoding_fn=pre_encoding_fn,
         )
+        
+        # tensor화 직전에 전처리
+        if pre_tensor_dataset_fn is not None:
+            self.pre_tensor_dataset(pre_tensor_dataset_fn)
+            
         self.make_tensor_dataset()
         return self.make_tensor_dataloader(
             batch_size=batch_size,
@@ -1303,377 +1336,29 @@ class DataPreprocessing:
 
 
 
-# class DataPreprocessing():
-#     """
-#     Description:
-#         데이터 분할(train/valid/test), Encoding, TensorDataset, DataLoader 생성을
-#         일관된 흐름으로 처리하는 전처리 유틸리티.
-
-#     Examples:
-#         dp = DataPreprocessing(X, y, split_size=(0.7, 0.1, 0.2))
-#         loaders = dp.fit_tensor_dataloader(
-#             encoder=[StandardScaler(), None],
-#             batch_size=32
-#         )
-#         train_loader = loaders['train']
-#     """
-#     def __init__(self, *data_args, split_size=(0.7, 0.1, 0.2), encoder=[], batch_size=1, random_state=None, shuffle=True, stratify=None, **kwargs):
-#         """
-#         Args:
-#             *data_args : 입력 데이터(X, y 등)
-#             split_size : (train, valid, test) 비율
-#             encoder : 각 데이터에 대응하는 encoder 리스트
-#             batch_size : DataLoader 기본 배치 크기
-#             random_state : 시드
-#             shuffle : 셔플 여부
-#             stratify : 계층 분할용 라벨
-#             **kwargs : DataLoader 옵션
-#         """
-#         self.data_args = data_args
-#         if len(data_args)>0:
-#             assert (np.array(list(map(len, self.data_args)))/len(self.data_args[0])).all() == True, 'Arguments must have same length'
-#         # input data to DataFrame
-#         self.df_data = tuple([self._to_dataframe(data) for data in data_args])
-#         self.index = {}
-#         self.split_data = {}
-#         self.split_dataframe = pd.DataFrame()
-#         self.transformed_data = {}
-#         self.tensor_dataset = {}
-#         self.tensor_dataloader = {}
-        
-#         # index
-#         self.full_index = None
-        
-#         # encoder
-#         if len(encoder) == 0:
-#             self.encoder = [DS_NoneEncoder() for _ in range(len(self.data_args))]
-#         else:
-#             self.encoder = [(DS_NoneEncoder() if enc is None else enc) for enc in encoder]
-        
-#         # split_size
-#         self._set_split_size(split_size)
-        
-#         # params
-#         self.random_state = random_state
-#         # 클래스 전용 난수 생성기
-#         self.generator = torch.Generator()
-#         if self.random_state is not None:
-#             self.generator.manual_seed(random_state)
-        
-#         self.batch_size = batch_size
-#         self.shuffle = shuffle
-#         self.stratify = self._to_dataframe(stratify) if stratify is not None else None
-#         self.kwargs = kwargs
-        
-#         # dataset & dataloader        
-#         self.dataset = None
-#         self.dataloader = None
-
-#     def _to_dataframe(self, data):
-#         """
-#         Description:
-#             입력을 DataFrame 형태로 통일.
-
-#         Returns:
-#             변환된 DataFrame
-#         """
-#         row_dim = len(data)
-#         if 'DataFrame' not in str(type(data)):
-#             column_dim = len(data[0])
-#             columns = list(np.arange(column_dim))
-#             data_index = list(np.arange(row_dim))
-#             return pd.DataFrame(data, columns=columns, index=data_index)
-#         else:
-#             return data
-    
-#     def _set_split_size(self, split_size):
-#         """
-#         Description:
-#             분할 비율을 내부 구조에 맞게 정규화.
-#         """
-#         self.split_size = [s/np.sum(split_size) for s in split_size]
-        
-#         if len(self.split_size) == 2:
-#             self.train_test_split_size = self.split_size
-#             self.train_valid_split_size = None
-#         elif len(self.split_size) == 3:
-#             self.train_test_split_size = [self.split_size[0]+self.split_size[1], self.split_size[2]]
-#             self.train_valid_split_size = [s/self.train_test_split_size[0] for s in self.split_size[:2]]
-    
-#     def set_split_from_dataframe(self, split_cols, *data_args):
-#         """
-#         Description:
-#             이미 존재하는 split 컬럼(train/valid/test) 기반으로 데이터 분할.
-
-#         Args:
-#             split_cols : 분할 정보를 담은 Series
-#             *data_args : 실제 데이터
-#         """
-#         self.data_args = data_args
-#         self.df_data = tuple([self._to_dataframe(data) for data in data_args])
-        
-#         train_valid_test_categories = split_cols.value_counts().index
-#         for name in train_valid_test_categories:
-#             data_tuple = []
-#             for di, data in enumerate(data_args):
-#                 dataframe = self._to_dataframe(data)
-#                 filtered_data = dataframe[split_cols == name]
-#                 if di == 0:
-#                     self.index[name] = np.array(list(filtered_data.index))
-#                     setattr(self, f"{name}_idx", self.index[name])
-#                 data_tuple.append(filtered_data)
-#             self.split_data[name] = tuple(data_tuple)    
-            
-#         # split_size
-#         self.split_size = np.array([len(v) for v in self.index.values()])
-#         self.split_size = self.split_size/self.split_size.sum()
-        
-#         # full_index
-#         self.full_index = np.concatenate([idx for idx in self.index.values()], axis=0)
-#         self.full_index.sort()
-    
-#     def split(self, split_size=None, random_state=None, shuffle=None, stratify=None, verbose=0):
-#         """
-#         Description:
-#             입력 데이터를 train/valid/test 로 분할.
-
-#         Args:
-#             split_size : 새 비율 지정 가능
-#             random_state : 시드
-#             shuffle : 셔플 여부
-#             stratify : 계층 분할 라벨
-#             verbose : 정보 출력 옵션
-
-#         Returns:
-#             {'train':..., 'valid':..., 'test':...}
-#         """
-#         self.random_state = self.random_state if random_state is None else random_state
-#         self.shuffle = self.shuffle if shuffle is None else shuffle
-#         self.stratify = self.stratify if stratify is None else self._to_dataframe(stratify)
-#         if split_size is not None:
-#             self._set_split_size(split_size)
-        
-#         # index split
-#         # train_test_split
-#         full_index = np.array(list(self.df_data[0].index))
-#         self.train_idx, self.test_idx = train_test_split(full_index, test_size=self.train_test_split_size[-1], random_state=self.random_state, shuffle=self.shuffle, stratify=self.stratify)
-#         self.index = {'train':self.train_idx, 'text':self.test_idx}
-        
-#         # train_valid_split
-#         if self.train_valid_split_size is not None: 
-#             train_valid_stratify = self.stratify.loc[self.train_idx] if self.stratify is not None else None
-#             self.train_idx, self.valid_idx = train_test_split(self.train_idx, test_size=self.train_valid_split_size[-1], random_state=self.random_state, shuffle=self.shuffle, stratify=train_valid_stratify)
-#             self.index = {'train':self.train_idx, 'valid':self.valid_idx, 'test':self.test_idx}
-#             self.split_data = {'train':[], 'valid':[], 'test':[]}
-#         else:
-#             self.split_data = {'train':[],  'test':[]}
-        
-#         # data split
-#         for idx, split_name in zip(self.index.values(), self.split_data.keys()):
-#             self.split_data[split_name] = tuple([df.loc[idx] for df in self.df_data])
-        
-#         # split dataframe
-#         for name, data in self.split_data.items():
-#             split_df = pd.concat(data, axis=1)    
-#             split_df.insert(0, 'train_valid_test', name)
-#             self.split_dataframe = pd.concat([self.split_dataframe, split_df], axis=0)
-#         self.split_dataframe.sort_index(inplace=True)
-        
-#         # full_index
-#         self.full_index = np.concatenate([idx for idx in self.index.values()], axis=0)
-#         self.full_index.sort()
-        
-#         # verbose
-#         if verbose > 0:
-#             [print(len(index), end=', ') for index in self.index.values()]
-#         return self.split_data
-
-#     def encoding(self, encoder=None):
-#         """
-#         Description:
-#             분할된 데이터에 encoder 적용 (train: fit_transform, 나머지: transform).
-
-#         Args:
-#             encoder : encoder 리스트
-
-#         Returns:
-#             transformed_data 딕셔너리
-#         """
-#         self.encoder = self.encoder if encoder is None else encoder
-        
-#         if len(self.split_data) == 0:
-#             raise Exception("'data_split' must be performed first.")
-#         else:
-#             if len(self.encoder) != len(self.df_data):
-#                 raise Exception("'encoder' must have the same number as data_args.")
-#             else:
-#                 for split_name, data in self.split_data.items():
-#                     transformed_data_list = []
-#                     for ei in range(len(self.encoder)):
-#                         if split_name == 'train':
-#                             transformed_data = self.encoder[ei].fit_transform(data[ei])
-#                         else:
-#                             transformed_data = self.encoder[ei].transform(data[ei])
-                        
-#                         # to_array & dtype
-#                         if str(self.encoder[ei]) == 'OneHotEncoder()':
-#                             transformed_data = transformed_data.toarray().astype(np.int64)
-#                         transformed_data_list.append(transformed_data)
-#                     self.transformed_data[split_name] = tuple(transformed_data_list)
-        
-#         return self.transformed_data
-    
-#     # full process for transformed data
-#     def fit_transform(self, split_size=None, encoder=None, random_state=None, shuffle=None, stratify=None, verbose=0):
-#         """
-#         Description:
-#             split()과 encoding()을 한 번에 수행.
-
-#         Args:
-#             split_size : 비율
-#             encoder : encoder 리스트
-#             random_state, shuffle, stratify, verbose : 분할 옵션
-
-#         Returns:
-#             transformed_data
-#         """
-#         self.split(split_size=split_size, random_state=None, shuffle=shuffle, stratify=stratify, verbose=verbose)
-#         return self.encoding(encoder=encoder)
-
-#     def make_tensor_dataset(self):
-#         """
-#         Description:
-#             transformed_data를 TensorDataset으로 변환.
-
-#         Returns:
-#             tensor_dataset 딕셔너리
-#         """
-#         if len(self.transformed_data) == 0:
-#             raise Exception("'encoding' must be performed first.")
-#         else:
-#             dtypes_str = [str(data.dtype) for data in self.transformed_data['train']]
-            
-#             for name, data_tuple in self.transformed_data.items():
-#                 data_tensor = []
-#                 for data, dtype in zip(data_tuple, dtypes_str):
-#                     if 'float' in dtype:
-#                         data_tensor.append(torch.FloatTensor(data))
-#                     elif 'int' in dtype:
-#                         data_tensor.append(torch.LongTensor(data))
-#                     else:
-#                         raise Exception("'torch tensor is only allowed 'int' or 'floar' types.")
-#                 self.tensor_dataset[name] = TensorDataset(*data_tensor)    
-#         return self.tensor_dataset
-
-#     def make_tensor_dataloader(self, batch_size=None, shuffle=None, random_state=None, **kwargs):
-#         """
-#         Description:
-#             TensorDataset 기반으로 DataLoader 생성.
-
-#         Args:
-#             batch_size : 배치 크기
-#             shuffle : 셔플 여부
-#             random_state : 시드
-#             **kwargs : DataLoader 옵션
-
-#         Returns:
-#             tensor_dataloader 딕셔너리
-#         """
-#         self.batch_size = self.batch_size if batch_size is None else batch_size
-#         self.shuffle = self.shuffle if shuffle is None else shuffle
-#         if random_state is not None:
-#             self.random_state = random_state
-#             self.generator = torch.Generator()
-#             self.generator.manual_seed(random_state)
-        
-#         if len(self.tensor_dataset) == 0:
-#             raise Exception("'make_tensor_dataset' must be performed first.")
-#         else:
-#             for name, tensor_dataset in self.tensor_dataset.items():
-#                 self.tensor_dataloader[name] = DataLoader(tensor_dataset, batch_size=self.batch_size, shuffle=self.shuffle, generator=self.generator, **kwargs)
-        
-#         return self.tensor_dataloader
-    
-#     # full process for torchDataset
-#     def fit_tensor_dataloader(self, split_size=None, encoder=None, batch_size=None, random_state=None, shuffle=None, stratify=None, verbose=0, **kwargs):
-#         """
-#         Description:
-#             split → encoding → TensorDataset → DataLoader 전체 과정을 한 번에 처리.
-
-#         Args:
-#             split_size, encoder, batch_size, random_state, shuffle, stratify, verbose
-#             **kwargs : DataLoader 옵션
-
-#         Returns:
-#             tensor_dataloader
-#         """
-#         self.fit_transform(split_size=split_size, encoder=encoder, random_state=random_state, shuffle=shuffle, stratify=stratify, verbose=verbose)
-#         self.make_tensor_dataset()
-#         return self.make_tensor_dataloader(batch_size=batch_size, shuffle=shuffle, random_state=random_state, **kwargs)
-    
-#     def _repr_dictformat(self, dict_in, intend=4, parentheses_sep="\n"):
-#         """객체 상태 요약 Helper."""
-#         repr_output = "{" + f"{parentheses_sep}"
-#         for i, (name, shapes) in enumerate(dict_in.items()):
-#             comma = "," if i < len(dict_in) - 1 else ""
-#             if i==0:
-#                 if parentheses_sep == "\n":
-#                     repr_output += f"{' '*intend}'{name}': {shapes}{comma}"
-#                 else:
-#                     repr_output += f"'{name}': {shapes}{comma}"
-#             else:
-#                 repr_output += f"\n{' '*intend}'{name}': {shapes}{comma}"
-#         if parentheses_sep == '\n':
-#             repr_output +=  f"{parentheses_sep}{' ' * intend}" +"}"
-#         else:
-#             repr_output +=  f"{parentheses_sep}" +"}"
-#         return repr_output
-    
-#     def get_feature_names_out(self):
-#         """
-#         Description:
-#             encoder들이 가진 feature 이름 반환.
-#         """
-#         if len(self.encoder) > 0:
-#             return tuple([encoder.get_feature_names_out() for encoder in self.encoder])
-    
-#     def __repr__(self):
-#         """객체 상태 요약."""
-#         repr_str = "<df_data : " + ", ".join([str(df.shape) for df in self.df_data]) + ">"
-#         if len(self.split_data) > 0:
-#             split_ratio_str = {name: size.item() for (name, data), size in zip(self.split_data.items(), self.split_size)}
-#             split_size_str = {name: tuple([data.shape for data in data_tuple]) for name, data_tuple in self.split_data.items()}
-#             repr_str += f"\n  └ self.split_size: {split_ratio_str}" + f"\n    split_data: {self._repr_dictformat(split_size_str, intend=20, parentheses_sep='')}"
-            
-#         if len(self.transformed_data) > 0:
-#             encoder_str = str(tuple(self.encoder))
-#             trainsformed_str = {name: tuple([data.shape for data in data_tuple]) for name, data_tuple in self.transformed_data.items()}
-#             repr_str += f"\n  └ self.encoder: {encoder_str}" + f"\n    transformed_data: {self._repr_dictformat(trainsformed_str, intend=20, parentheses_sep='')}"
-        
-#         if len(self.tensor_dataset) > 0:
-#             repr_str += f"\n  └ self.tensor_dataset: {self._repr_dictformat(self.tensor_dataset, intend=20, parentheses_sep='')}"
-        
-#         if len(self.tensor_dataloader) > 0:
-#             repr_str += f"\n  └ (dataloader options) batch_size: {self.batch_size}, shuffle: {self.shuffle}, random_state: {self.random_state}" +  f"\n    self.tensor_dataloader: {self._repr_dictformat(self.tensor_dataloader, intend=20, parentheses_sep='')}"
-#         return repr_str
-
-
-
 # df_y = pd.DataFrame(np.random.rand(20,1), columns=['y'])
 # df_X_con = pd.DataFrame(np.random.rand(20,5), columns=[f"x{i+1}" for i in range(5)])
 # X_cat_gen = np.concatenate([np.random.randint(0,4, size=(20,2)), np.random.randint(0,2, size=(20,3))], axis=1)
 # df_X_cat = pd.DataFrame(X_cat_gen, columns=[f"x{i+6}" for i in range(5)])
 
-# df_tuple = (df_y, df_X_con, df_X_cat)
-# df_tuple = (df_y.to_numpy(), df_X_con.to_numpy(), df_X_cat.to_numpy())
+# np_y = (np.random.rand(100,1) > 0.3).astype(np.int64)
+# np_X = np.random.rand(100,50,4)
+# np_bool = (np.random.rand(100,50) > 0.5).astype(bool)
 
-# pc = Preprocessing(*df_tuple, split_size=(0.8, 0.2), stratify=df00[X_cols_cat])
-# pc = Preprocessing(*df_tuple, stratify=df00[X_cols_cat], encoder=[StandardScaler(), StandardScaler(), DS_LabelEncoder()])
-# pc = DataPreprocessing(*df_tuple, stratify=df00[X_cols_cat], encoder=[StandardScaler(), StandardScaler(), OneHotEncoder(sparse_output=True)])
-# pc = DataPreprocessing(*df_tuple, stratify=df00[X_cols_cat], encoder=[StandardScaler(), None, DS_LabelEncoder()])
-# pc = DataPreprocessing(*df_tuple, stratify=df00[X_cols_cat])
 
-# pc = DataPreprocessing(*df_tuple
+
+# data_tuple = (df_y, df_X_con, df_X_cat)
+# data_tuple = (df_y.to_numpy(), df_X_con.to_numpy(), df_X_cat.to_numpy())
+# data_tuple = (np_y, np_X, dnp_bool)
+
+
+# pc = DataPreprocessing(*data_tuple, split_size=(0.8, 0.2), stratify=df_X_cat['x10'])
+# pc = DataPreprocessing(*data_tuple, stratify=df_X_cat['x10'], encoder=[StandardScaler(), StandardScaler(), DS_LabelEncoder()])
+# pc = DataPreprocessing(*data_tuple, stratify=df_X_cat['x10'], encoder=[StandardScaler(), StandardScaler(), OneHotEncoder(sparse_output=True)])
+# pc = DataPreprocessing(*data_tuple, stratify=df_X_cat['x10'], encoder=[StandardScaler(), None, DS_LabelEncoder()])
+# pc = DataPreprocessing(*data_tuple, stratify=df_X_cat['x10'])
+
+# pc = DataPreprocessing(*data_tuple
 #                        ,split_size=(5,1,2)
 #                        ,stratify=df_X_cat.iloc[:,[-1]]
 #                        ,encoder=[StandardScaler(), StandardScaler(), DS_LabelEncoder()]
@@ -1689,11 +1374,10 @@ class DataPreprocessing:
 # a2 = pc.fit_transform()
 # a4 = pc.fit_tensor_dataloader()
 
+# pc.np_data
 # pc.index
 # pc.get_feature_names_out()
 # pc.split_size
-# pc.split_data
-# pc.split_dataframe
 # pc.transformed_data
 # pc.tensor_dataset
 # pc.tensor_dataloader
