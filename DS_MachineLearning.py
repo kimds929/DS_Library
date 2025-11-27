@@ -24,8 +24,14 @@ from itertools import combinations
 
 import sys
 sys.path.append(r'D:/작업방/업무 - 자동차 ★★★/Workspace_Python/DS_Module')
-from DS_DataFrame import *
-from DS_DataFrame import DataHandler
+
+try:
+    # from DS_DataFrame import *
+    from DS_DataFrame import DataHandler
+except:
+    import requests
+    remote_library_url = 'https://raw.githubusercontent.com/kimds929/'
+    response = requests.get(f"{remote_library_url}/DS_Library/main/DS_DataFrame.py", verify=False); exec(response.text)
 
 
 import copy
