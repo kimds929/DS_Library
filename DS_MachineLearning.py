@@ -4603,8 +4603,8 @@ from sklearn.preprocessing import StandardScaler
 # import sys
 # sys.path.append(r'D:\작업방\업무 - 자동차 ★★★\Worksapce_Python\DS_Module')
 # sys.path.append('d:\\Python\\★★Python_POSTECH_AI\\DS_Module')    # 모듈 경로 추가
-from DS_DataFrame import *
-from DS_OLS import *
+
+# from DS_OLS import *
 
 # absolute_path = 'D:/Python/★★Python_POSTECH_AI/Postech_AI 4) Aritificial_Intelligent/교재_실습_자료/'
 # absolute_path = 'D:/Python/★★Python_POSTECH_AI/Dataset_AI/DataMining/'
