@@ -10,7 +10,7 @@ except:
     pass
 
 from collections import namedtuple
-import datetime
+from datetime import datetime
 import dateutil
 import re
 
@@ -35,7 +35,7 @@ import statsmodels.api as sm
 # 
 # #2-3. 날짜 텍스트 → 날짜 변환(스칼라값) - python 
 # import datetime print(datetime.date.fromisoformat('2020-07-21')) 
-# # 2020-07-21 print(datetime.datetime.fromisoformat('2020-07-21')) 
+# # 2020-07-21 print(datetime.fromisoformat('2020-07-21')) 
 # # 2020-07-21 00:00:00 print(datetime.time.fromisoformat('07:01:45')) # 07:01:45
 
 
@@ -589,9 +589,9 @@ def series_plot(date_time, index=None, columns=None,
 
 
 # 마스킹된 시계열 데이터에 대해 롤링 평균을 적용하여 결측값을 보간하는 함수
-def smoothing(x, mask, window=3, min_periods=1, center=True, agg='mean', **kwargs):
+def series_smoothing(x, mask, window=3, min_periods=1, center=True, agg='mean', **kwargs):
     """
-    Apply smoothing to masked values in a Pandas Series or DataFrame using a rolling window.
+    Apply series_smoothing to masked values in a Pandas Series or DataFrame using a rolling window.
 
     This function replaces values that do not satisfy the given mask with NaN,
     computes a rolling aggregation (default: mean) over the masked data, and then
@@ -634,7 +634,7 @@ def smoothing(x, mask, window=3, min_periods=1, center=True, agg='mean', **kwarg
     >>> import numpy as np
     >>> data = pd.Series([1, 2, 10, 4, 5])
     >>> mask = data < 9
-    >>> smoothing(data, mask, window=3)
+    >>> series_smoothing(data, mask, window=3)
     0    1.0
     1    2.0
     2    2.333333
@@ -714,7 +714,7 @@ class DatetimeHandler():
 
     # datetime format union
     def union_to_datetime(self, date):
-        if 'datetime.datetime' in str(type(date)) :
+        if 'datetime' in str(type(date)) :
             return date
         elif 'pandas' in str(type(date)) or 'numpy' in str(type(date)):
             return pd.Series([date])[0].to_pydatetime()
@@ -731,7 +731,7 @@ class DatetimeHandler():
             date_str = str(date_str)
 
         if strp_format is not None:
-            return datetime.datetime.strptime(date_str, strp_format)
+            return datetime.strptime(date_str, strp_format)
 
         date_instance = namedtuple('date_info', ['date', 'sep', 'strf_format'])
 
@@ -779,12 +779,12 @@ class DatetimeHandler():
                 break
                 
         if len(date_list[0]) == 2:
-            if int(date_list[0]) >= int(str(datetime.datetime.now().year + thousand_criteria)[2:]):
+            if int(date_list[0]) >= int(str(datetime.now().year + thousand_criteria)[2:]):
                 date_list[0] = '19' + date_list[0]
             else:
                 date_list[0] = '20' + date_list[0]
         
-        date_result = datetime.datetime(*map(int, date_list))
+        date_result = datetime(*map(int, date_list))
         
         breakN = 0
         while len(sep_list) < 5:
@@ -837,13 +837,13 @@ class DatetimeHandler():
         else:
             date_string = str(date_number)
             if strp_format is not None:
-                return datetime.datetime.strptime(date_string, strp_format)
+                return datetime.strptime(date_string, strp_format)
             elif '.' not in date_string and len(date_string) == 8:
-                return datetime.datetime.strptime(date_string, '%Y%m%d')
+                return datetime.strptime(date_string, '%Y%m%d')
             elif '.' not in date_string and len(date_string) == 6:
-                return datetime.datetime.strptime(date_string, '%y%m%d')
+                return datetime.strptime(date_string, '%y%m%d')
             elif '.' not in date_string and len(date_string) == 4:
-                return datetime.datetime.strptime(date_string, '%y%m')
+                return datetime.strptime(date_string, '%y%m')
             else:
                 return self.base_date + datetime.timedelta(days=date_number)
 
@@ -919,11 +919,11 @@ class DatetimeHandler():
         
         if 'date' in return_type:
             if return_format is not None:
-                self.date = datetime.datetime.strptime(self.date.strftime(apply_format), apply_format)
+                self.date = datetime.strptime(self.date.strftime(apply_format), apply_format)
             return self.date
         elif 'num' in return_type:
             if return_format is not None:
-                self.date = datetime.datetime.strptime(self.date.strftime(apply_format), apply_format)
+                self.date = datetime.strptime(self.date.strftime(apply_format), apply_format)
             return self.date_to_number(self.date)
         else:
             date_string = self.date.strftime(apply_format)
@@ -972,9 +972,9 @@ class DatetimeHandler():
         result = np.random.choice(date_range, size)
 
         if return_type == 'date' or return_type == 'datetime' or return_type is None:
-            return np.array(list(map(lambda x: datetime.datetime.utcfromtimestamp(int(x) * (1e-9)), result)))
+            return np.array(list(map(lambda x: datetime.utcfromtimestamp(int(x) * (1e-9)), result)))
         elif return_type == 'str':
-            return np.array(list(map(lambda x: datetime.datetime.utcfromtimestamp(int(x) * (1e-9)).strftime(strf_format), result)))   
+            return np.array(list(map(lambda x: datetime.utcfromtimestamp(int(x) * (1e-9)).strftime(strf_format), result)))   
         elif return_type == 'numpy':
             return result
 
@@ -988,7 +988,7 @@ class DatetimeHandler():
             return False
         
         # dataset ***
-        date_now = datetime.datetime.now()
+        date_now = datetime.now()
 
         series_x = pd.Series(x)
         series_x_drop_duplicates = series_x.drop_duplicates()
@@ -1056,13 +1056,13 @@ class DatetimeHandler():
                     if type(possible_formats) == list:
                         for f in possible_formats:
                             try:
-                                transformed_x = apply_sereis.apply(lambda x: np.nan if pd.isna(x) else datetime.datetime.strptime(x, f))
+                                transformed_x = apply_sereis.apply(lambda x: np.nan if pd.isna(x) else datetime.strptime(x, f))
                                 isdatetime = True
                             except:
                                 isdatetime = False
                     elif type(possible_formats) == str:
                         try:
-                            transformed_x = apply_sereis.apply(lambda x: np.nan if pd.isna(x) else datetime.datetime.strptime(x, possible_formats))
+                            transformed_x = apply_sereis.apply(lambda x: np.nan if pd.isna(x) else datetime.strptime(x, possible_formats))
                             isdatetime = True
                         except:
                             isdatetime = False

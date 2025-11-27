@@ -1062,7 +1062,7 @@ class DS_LabelEncoder:
 
 
 # Customizing StandardScaler
-class DS_StandardEncoder:
+class DS_StandardScaler:
     """
     - np.nanmean / np.nanstd 기반의 Standard Scaling
     - DataFrame / ndarray 모두 지원
@@ -1141,7 +1141,7 @@ class DS_StandardEncoder:
         반환 : ndarray (입력 타입은 유지하지 않음, 수치 연산용으로 사용)
         """
         if not self._fitted:
-            raise RuntimeError("DS_StandardEncoder is not fitted yet. Call 'fit' first.")
+            raise RuntimeError("DS_StandardScaler is not fitted yet. Call 'fit' first.")
 
         if isinstance(X, pd.DataFrame):
             arr = X.to_numpy(dtype=float)
@@ -1169,7 +1169,7 @@ class DS_StandardEncoder:
           ndarray 였으면 원래 shape로 reshape해서 ndarray로 반환
         """
         if not self._fitted:
-            raise RuntimeError("DS_StandardEncoder is not fitted yet. Call 'fit' first.")
+            raise RuntimeError("DS_StandardScaler is not fitted yet. Call 'fit' first.")
 
         # 우선 ndarray로 통일
         if isinstance(X, pd.DataFrame):
@@ -1221,7 +1221,7 @@ class DS_StandardEncoder:
         - 그 외(ND)에는 None
         """
         if not self._fitted:
-            raise RuntimeError("DS_StandardEncoder is not fitted yet.")
+            raise RuntimeError("DS_StandardScaler is not fitted yet.")
 
         if self.feature_names_ is None:
             return None
@@ -1229,7 +1229,7 @@ class DS_StandardEncoder:
 
     def __repr__(self):
         return (
-            f"DS_StandardEncoder("
+            f"DS_StandardScaler("
             f"axis={self.axis}, "
             f"with_mean={self.with_mean}, "
             f"with_std={self.with_std}, "
@@ -1239,7 +1239,7 @@ class DS_StandardEncoder:
         )
 
 
-# class DS_StandardEncoder():
+# class DS_StandardScaler():
 #     def __init__(self, axis=None):
 #         self.mean = None
 #         self.std = None
@@ -1266,7 +1266,7 @@ class DS_StandardEncoder:
 #             return x * self.std + self.mean
     
 #     def __repr__(self):
-#         return "DS_StandardEncoder()"
+#         return "DS_StandardScaler()"
 
 ################################################################################################
 
