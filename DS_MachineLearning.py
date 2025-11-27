@@ -25,14 +25,6 @@ from itertools import combinations
 import sys
 # sys.path.append(r'D:/작업방/업무 - 자동차 ★★★/Workspace_Python/DS_Module')
 
-from DS_DataFrame import *
-from DS_DataFrame import DataHandler
-# try:
-#     from DS_DataFrame import DataHandler
-# except:
-#     import requests
-#     remote_library_url = 'https://raw.githubusercontent.com/kimds929/'
-#     response = requests.get(f"{remote_library_url}/DS_Library/main/DS_DataFrame.py", verify=False); exec(response.text)
 
 
 import copy
@@ -44,512 +36,6 @@ import torch
 
 
 
-
-
-# Tabular(or 2D-matrix) Data에서 여러 dtype에 대해 유연하게 LabelEncoding을 적용하는 Class
-class TabularLabelEncoder:
-    def __init__(self, nan_value=-1, unseen_as_nan=False):
-        self.encoders = {}
-        self.feature_names = None
-        self.nan_replacements = {}
-        self.original_dtypes = {}
-        self.nan_value = nan_value
-        self.unseen_as_nan = unseen_as_nan
-    
-    def fit(self, X):
-        if isinstance(X, pd.DataFrame):
-            self.feature_names = list(X.columns)
-            data = X.copy()
-        elif isinstance(X, np.ndarray):
-            self.feature_names = list(range(X.shape[1]))
-            data = pd.DataFrame(X)
-        else:
-            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
-        
-        for col in self.feature_names:
-            col_data = data[col]
-            self.original_dtypes[col] = col_data.dtype
-            
-            # object dtype이지만 내부 값이 전부 숫자면 숫자로 처리
-            if col_data.dtype == object:
-                try:
-                    col_data = pd.to_numeric(col_data)
-                except ValueError:
-                    pass
-            
-            le = LabelEncoder()
-            
-            if np.issubdtype(col_data.dtype, np.floating):
-                replacement = self.nan_value
-                self.nan_replacements[col] = replacement
-                col_data = col_data.fillna(replacement).astype(np.int64)
-            elif np.issubdtype(col_data.dtype, np.integer):
-                replacement = self.nan_value
-                self.nan_replacements[col] = replacement
-                col_data = col_data.fillna(replacement)
-            elif col_data.dtype == object:
-                replacement = '__missing__'
-                self.nan_replacements[col] = replacement
-                col_data = col_data.fillna(replacement)
-            else:
-                raise ValueError(f"Unsupported dtype for column {col}: {col_data.dtype}")
-            
-            le.fit(col_data)
-            self.encoders[col] = le
-        
-        return self
-    
-    def transform(self, X):
-        if isinstance(X, pd.DataFrame):
-            data = X.copy()
-        elif isinstance(X, np.ndarray):
-            data = pd.DataFrame(X)
-        else:
-            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
-        
-        transformed = pd.DataFrame(index=data.index)
-        
-        for col in self.feature_names:
-            col_data = data[col]
-            
-            if col_data.dtype == object:
-                try:
-                    col_data = pd.to_numeric(col_data)
-                except ValueError:
-                    pass
-            
-            replacement = self.nan_replacements[col]
-            col_data = col_data.fillna(replacement)
-            
-            le = self.encoders[col]
-            known_classes = set(le.classes_)
-            
-            if self.unseen_as_nan:
-                # unseen 값을 NaN 대체값으로 변환
-                col_data = col_data.apply(lambda x: x if x in known_classes else replacement)
-                transformed[col] = le.transform(col_data)
-            else:
-                # unseen 값을 새로운 category로 추가
-                unseen_values = set(col_data) - known_classes
-                if unseen_values:
-                    le.classes_ = np.append(le.classes_, list(unseen_values))
-                transformed[col] = le.transform(col_data)
-        
-        return transformed
-    
-    def inverse_transform(self, X):
-        if isinstance(X, pd.DataFrame):
-            data = X.copy()
-        elif isinstance(X, np.ndarray):
-            data = pd.DataFrame(X)
-        else:
-            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
-        
-        inversed = pd.DataFrame(index=data.index)
-        
-        for col in self.feature_names:
-            le = self.encoders[col]
-            decoded = le.inverse_transform(data[col])
-            replacement = self.nan_replacements[col]
-            
-            decoded = np.where(decoded == replacement, np.nan, decoded)
-            inversed[col] = decoded
-        
-        return inversed
-    
-    def fit_transform(self, X):
-        return self.fit(X).transform(X)
-
-    def __repr__(self):
-        repr_str = "<customize.TabularLabelEncoder>"
-        if len(self.encoders) > 0:
-            encoders_str = '\n'.join([f"  {k}: {v}" for k, v in self.encoders.items()])
-            return repr_str + '\n{\n' + encoders_str + '\n}'
-        else:
-            return repr_str
-
-
-
-# ('matrix_info' : ('frame_info' : ['data', 'index', 'columns']), kind, dtypes, nuniques)
-# Vector 형태 (1차원 vector 또는 (-1,1) Shpaed Matrix)의 숫자형 데이터에 Scaler를 적용하는 Class
-class ScalerVector:
-    """
-    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy
-    【required (Function)】DataHandler, class_object_execution
-
-    < Input >
-     . scaler : Scaler Object or String
-                * required: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
-     . x : '1dim vector' or '(-1, 1)shaped matrix'
-
-    < Method >
-     . fit
-     . transform
-     . fit_transform
-     . inverse_transform
-    """
-    def __init__(self, scaler='StandardScaler', **kwargs):
-        self.name = 'Undefined'
-        self.scaler = class_object_execution(scaler, **kwargs)
-        self.DataHandler = DataHandler()
-
-    def fit(self, x):
-        fitted_info = self.DataHandler.data_info(x, save_data=False)
-        self.fitted_ndim = fitted_info.ndim
-        self.fitted_object = self.DataHandler.vector_info_split(x)
-        self.scaler.fit(self.fitted_object.data['data'].reshape(-1,1))
-        self.name = self.fitted_object.data['name']
-        self.transformed_names = [self.name]
-
-    def transform(self, x, fitted_format=False, apply_name=False, ndim=None, kind=None):
-        transformed_info = self.DataHandler.data_info(x, save_data=False)
-        transformed_object = self.DataHandler.vector_info_split(x)
-        transformed_data = self.scaler.transform(transformed_object.data['data'].reshape(-1,1))
-
-        if fitted_format:
-            apply_name = transformed_object.data['name'] if apply_name is False else apply_name
-            return self.DataHandler.transform(transformed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
-                apply_ndim=self.fitted_ndim, apply_index=transformed_object.data['index'], apply_dtypes='float')
-        else:
-            apply_kind = True if kind is None else kind
-            apply_ndim = transformed_info.ndim if ndim is None else ndim
-            return self.DataHandler.transform(transformed_data, apply_instance=transformed_object, apply_columns=True,
-                apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes='float')
-
-    def fit_transform(self, x, ndim=None, kind=None):
-        self.fit(x)
-        fitted_format = True if ndim is None and kind is None else False
-        return self.transform(x, fitted_format=fitted_format, apply_name=True, ndim=ndim, kind=kind)
-
-    def inverse_transform(self, x, fitted_format=True, apply_name=False, ndim=None, kind=None, dtypes=None):
-        inversed_info = self.DataHandler.data_info(x, save_data=False)
-        inversed_object = self.DataHandler.vector_info_split(x)
-        inversed_data = self.scaler.inverse_transform(inversed_object.data['data'].reshape(-1,1))
-
-        if fitted_format:
-            apply_name = inversed_object.data['name'] if apply_name is False else apply_name
-            # apply_kind = self.fitted_object.kind if kind is None else kind
-            apply_ndim = self.fitted_ndim
-            apply_dtypes = dtypes if dtypes is not None else True
-            return self.DataHandler.transform(inversed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
-                apply_ndim=apply_ndim,
-                apply_dtypes=apply_dtypes, apply_index=inversed_object.data['index'])
-        else:
-            apply_name = inversed_object.data['name'] if apply_name is False else apply_name
-            apply_kind = True if kind is None else kind
-            apply_ndim = inversed_info.ndim if ndim is None else ndim
-            apply_dtypes = dtypes if dtypes is not None else self.fitted_object.dtypes
-            return self.DataHandler.transform(inversed_data, apply_instance=inversed_object, apply_columns=apply_name,
-                apply_kind=apply_kind, apply_ndim=apply_ndim, 
-                apply_dtypes=apply_dtypes, apply_index=True)
-
-    def __repr__(self):
-        return f"(ScalerInstance) {self.name}: {self.scaler}"
-
-
-# Vector 형태 (1차원 vector 또는 (-1,1) Shpaed Matrix)의 문자형 데이터에 Encoder를 적용하는 Class
-class EncoderVector:
-    """
-    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy
-    【required (Function)】DataHandler, class_object_execution
-
-    < Input >
-     . encoder : Scaler Object or String
-                * required: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
-     . x : '1dim vector' or '(-1, 1)shaped matrix'
-
-    < Method >
-     . fit
-     . transform
-     . fit_transform
-     . inverse_transform
-     . get_params
-     . get_feature_names_out
-    """
-    def __init__(self, encoder='OneHotEncoder', **kwargs):
-        self.name='undefined'
-
-        if 'OneHotEncoder' in str(encoder):
-            if 'drop' not in kwargs.keys():
-                kwargs.update({'drop':'first'})
-            if 'sparse' not in kwargs.keys():
-                kwargs.update({'sparse':False})
-        # self.kwargs = kwargs
-        self.DataHandler = DataHandler()
-        self.encoder = class_object_execution(encoder, **kwargs)
-
-    def fit(self, x):
-        encoder_str = str(self.encoder)
-        fitted_info = self.DataHandler.data_info(x, save_data=False)
-        self.fitted_ndim = fitted_info.ndim
-        self.fitted_object = self.DataHandler.vector_info_split(x)
-        fitted_series = pd.Series(**self.fitted_object.data)
-        # fitted_series = pd.Series(**self.fitted_object.data).apply(lambda x: str(x))
-        
-        if 'OneHotEncoder' in encoder_str:
-            self.encoder.fit(fitted_series.to_frame())
-            try:
-                self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
-            except:
-                self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
-        elif 'LabelEncoder' in encoder_str:
-            self.encoder.fit(fitted_series)
-            self.transformed_names = [self.fitted_object.data['name']]
-        elif 'OrdinalEncoder' in encoder_str:
-            self.encoder.fit(fitted_series.to_frame())
-            self.transformed_names = [self.fitted_object.data['name']]
-
-        self.name = self.fitted_object.data['name']
-
-    def transform(self, x, fitted_format=False, apply_name=False, ndim=None, kind=None):
-        encoder_str = str(self.encoder)
-        transformed_info = self.DataHandler.data_info(x, save_data=False)
-        transformed_object = self.DataHandler.vector_info_split(x)
-        transformed_series = pd.Series(**transformed_object.data)
-        # transformed_series = pd.Series(**transformed_object.data).apply(lambda x: str(x))
-        if 'OneHotEncoder' in encoder_str or 'OrdinalEncoder' in encoder_str:
-            transformed_data = self.encoder.transform(transformed_series.to_frame())
-        elif 'LabelEncoder' in encoder_str:
-            transformed_data = self.encoder.transform(transformed_series)
-        
-        # name
-        if (fitted_format is True) or (apply_name is True):
-            apply_name = self.transformed_names
-        elif apply_name is False:
-            if 'OneHotEncoder' in encoder_str:
-                try:
-                    apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
-                except:
-                    apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
-            else:
-                apply_name = [transformed_object.data['name']]
-        else:
-            if 'OneHotEncoder' in encoder_str:
-                try:
-                    apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names_out()))
-                except:
-                    apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names()))
-            else:
-                apply_name = apply_name
-
-        # transform
-        if 'OneHotEncoder' not in encoder_str:
-            apply_name = apply_name[0]
-            if fitted_format:
-                return self.DataHandler.transform(transformed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
-                            apply_ndim=self.fitted_ndim, apply_index=transformed_object.data['index'], apply_dtypes='int')
-            else:
-                apply_kind = True if kind is None else kind
-                apply_ndim = transformed_info.ndim if ndim is None else ndim
-                return self.DataHandler.transform(transformed_data, apply_instance=transformed_object, apply_columns=True,
-                    apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes='int')
-        else:       # OneHotEncoder
-            parmas = self.encoder.get_params()
-            if parmas['sparse']:
-                transformed_data = transformed_data.toarray()
-            
-            if fitted_format:
-                # apply_kind = self.fitted_object.kind if kind is None else kind
-                apply_ndim = self.fitted_ndim if transformed_data.shape[1] == 1 else 2
-                return self.DataHandler.transform(transformed_data, apply_kind=self.fitted_object.kind, apply_columns=apply_name,
-                    apply_ndim=apply_ndim, apply_index=transformed_object.data['index'], apply_dtypes='int')
-            else:
-                apply_kind = transformed_object.kind if kind is None else kind
-                apply_ndim = (transformed_info.ndim if ndim is None else ndim) if transformed_data.shape[1] == 1 else 2
-
-                return self.DataHandler.transform(transformed_data, apply_kind=apply_kind, apply_columns=apply_name,
-                    apply_ndim=apply_ndim, apply_index=transformed_object.data['index'], apply_dtypes='int')
-
-    def fit_transform(self, x, ndim=None, kind=None):
-        self.fit(x)
-        fitted_format = True if ndim is None and kind is None else False
-        return self.transform(x, fitted_format=fitted_format, apply_name=True, ndim=ndim, kind=kind)
-
-    def inverse_transform(self, x, fitted_format=True, apply_name=False, ndim=None, kind=None, dtypes=None):
-        encoder_str = str(self.encoder)
-        inversed_info = self.DataHandler.data_info(x, save_data=False)
-        inversed_object = self.DataHandler.data_info_split(x, ndim=2)
-        inversed_data = self.encoder.inverse_transform(inversed_object.data['data'])
-
-        # name
-        if (fitted_format is True) or (apply_name is True):
-            apply_name = self.fitted_object.data['name']
-        elif apply_name is False:
-            if 'OneHotEncoder' in encoder_str:
-                apply_name = list(map(lambda x: x[:x.rfind('_')], inversed_object.data['columns']))[0]
-            else:
-                apply_name = inversed_object.data['columns']
-        else:
-            apply_name = apply_name if type(apply_name) == list else [apply_name]
-
-        if fitted_format:
-            apply_dtypes = dtypes if dtypes is not None else True
-            return self.DataHandler.transform(inversed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
-                apply_ndim=self.fitted_ndim, apply_index=inversed_object.data['index'], apply_dtypes=apply_dtypes)
-        else:
-            apply_kind = True if kind is None else kind
-            apply_ndim = inversed_info.ndim if ndim is None else ndim
-            apply_dtypes = dtypes if dtypes is not None else False
-            
-            return self.DataHandler.transform(inversed_data, apply_instance=inversed_object, apply_columns=apply_name,
-                apply_kind=apply_kind, apply_ndim=apply_ndim, 
-                apply_dtypes=apply_dtypes, apply_index=True)
-
-    def get_params(self):
-        return self.encoder.get_params()
-
-    def get_feature_names_out(self):
-        return np.array(self.transformed_names)
-
-    def __repr__(self):
-        return f"(EncoderInstance) {self.name}: {self.encoder}"
-
-
-
-
-### ★★★ ###
-# Matrix/Frame/DataFrame 데이터에 Scaler 또는 Encoder를 적용하는 Class
-class ScalerEncoder:
-    """
-    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy, functools.reduce
-    【required (Function)】DataHandler, class_object_execution, ScalerVector, EncoderVector, dtypes_split
-
-    < Input >
-     . encoder : dictionay type {'columns' : Scaler/Encoder Object or String, ...}
-                      (default) {'#numeric' : 'StandardScaler', '#object':'OneHotEncoder', '#time', 'StandardScaler'}
-                * required Scaler/Encoder: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
-     . X : 1dim, 2dim vector or matrix
-
-    < Method >
-     . fit
-     . transform
-     . fit_transform
-     . inverse_transform
-    """
-    def __init__(self, encoder=None, **kwargs):
-        self.apply_encoder = {'#numeric':'StandardScaler', '#object':'OneHotEncoder', '#time': 'StandardScaler'}
-        if encoder is not None:
-            self.apply_encoder.update(encoder)
-
-        self.DataHandler = DataHandler()
-        self.kwargs = kwargs
-        self.encoder = {}
-        self.match_columns = {}
-
-    def fit(self, X):
-        self.encoder = {}
-
-        fitted_info = self.DataHandler.data_info(X, save_data=False)
-        self.fitted_ndim = fitted_info.ndim
-        self.fitted_object = self.DataHandler.data_info_split(X, ndim=2)
-
-        fitted_DataFrame = pd.DataFrame(**self.fitted_object.data).astype(self.fitted_object.dtypes)
-        
-        self.columns_dtypes = pd.DataFrame(dtypes_split(fitted_DataFrame, return_type='columns_all')).T
-
-        for c in fitted_DataFrame:
-            if c in self.apply_encoder.keys():
-                if 'scaler' in str(self.apply_encoder[c]).lower():
-                    se = ScalerVector(scaler=self.apply_encoder[c])
-                elif 'encoder' in str(self.apply_encoder[c]).lower():
-                    se = EncoderVector(encoder=self.apply_encoder[c])
-            else:
-                apply_se = self.apply_encoder['#' + self.columns_dtypes.loc[c, 'dtype_group']]
-                if 'scaler' in str(apply_se).lower():
-                    se = ScalerVector(scaler=apply_se)
-                elif 'encoder' in str(apply_se).lower():
-                    se = EncoderVector(encoder=apply_se)
-            se.fit(fitted_DataFrame[c])
-            self.encoder[c] = copy.deepcopy(se)
-            self.match_columns[c] = se.transformed_names
-
-    def transform(self, X, fitted_format=False, columns=None, ndim=None, kind=None):
-        transformed_info = self.DataHandler.data_info(X, save_data=False)
-        transformed_object = self.DataHandler.data_info_split(X, ndim=2)
-        
-        X_DataFrame = pd.DataFrame(**transformed_object.data).astype(transformed_object.dtypes)
-        if transformed_object.kind != 'pandas':
-            X_DataFrame.columns = self.encoder.keys() if columns is None else columns
-        
-        # transform ***
-        transformed_DataFrame = pd.DataFrame()
-        for c in X_DataFrame:
-            transformed_columnvector = pd.DataFrame(self.encoder[c].transform(X_DataFrame[c], fitted_format=True))
-            transformed_DataFrame = pd.concat([transformed_DataFrame, transformed_columnvector], axis=1)
-        
-        # return ***
-        if fitted_format:
-            apply_ndim = self.fitted_ndim if transformed_DataFrame.shape[1] == 1 else 2
-            return self.DataHandler.transform(transformed_DataFrame, apply_kind=self.fitted_object.kind, apply_ndim=apply_ndim)
-        else:
-            apply_kind = transformed_object.kind if kind is None else kind
-            apply_ndim = (transformed_info.ndim if ndim is None else ndim) if transformed_DataFrame.shape[1] == 1 else 2
-            return self.DataHandler.transform(transformed_DataFrame, apply_kind=apply_kind, apply_ndim=apply_ndim)
-        
-    def fit_transform(self, X, ndim=None, kind=None):
-        self.fit(X)
-        fitted_format = True if ndim is None and kind is None else False
-        return self.transform(X, fitted_format=fitted_format, ndim=ndim, kind=kind)
-
-    def inverse_transform(self, X, fitted_format=False, columns=None, ndim=None, kind=None, dtypes=None):
-        inversed_info = self.DataHandler.data_info(X, save_data=False)
-        inversed_object = self.DataHandler.data_info_split(X, ndim=2)
-        
-        X_DataFrame = pd.DataFrame(**inversed_object.data).astype(inversed_object.dtypes)
-        if inversed_object.kind != 'pandas':
-            X_DataFrame.columns = reduce(lambda x,y : x + y, self.match_columns.values()) if columns is None else columns
-
-        Xcolumns = copy.deepcopy(X_DataFrame.columns)
-        match_columns = copy.deepcopy(self.match_columns)
-
-        # inverse_transform ***
-        inversed_DataFrame = pd.DataFrame()
-        while bool(len(Xcolumns)):
-            inversed_target = pd.DataFrame()
-
-            c = Xcolumns[0]
-            Xcolumns = Xcolumns.drop(c)
-            # print(c, Xcolumns)
-            if type(dtypes) == dict:
-                if c in dtypes:
-                    apply_dtypes = dtypes[c]
-                else:
-                    apply_dtypes = None
-            else:       # bool, str, dtype
-                apply_dtypes = dtypes
-
-            for fc, tc in match_columns.items():
-                if c in tc:
-                    inversed_target = X_DataFrame[tc]
-
-                    del match_columns[fc]
-                    tc.remove(c)
-                    Xcolumns = Xcolumns.drop(tc)
-                    
-                    inversed_data = self.encoder[fc].inverse_transform(inversed_target, fitted_format=fitted_format, ndim=2, dtypes=apply_dtypes)
-                    inversed_data.columns = [self.encoder[fc].name]
-
-                    inversed_DataFrame = pd.concat([inversed_DataFrame, inversed_data], axis=1)
-                    break
-            
-            if c == X_DataFrame.columns[-1]:
-                break
-            
-        # return ***
-        if fitted_format:
-            apply_ndim = self.fitted_ndim if inversed_DataFrame.shape[1] == 1 else 2
-            # apply_dtypes = dict(filter(lambda x: x[0] in X_DataFrame.columns, self.fitted_object.dtypes.items()))
-            apply_dtypes = dict(filter(lambda x: x[0] in inversed_DataFrame.columns, self.fitted_object.dtypes.items()))
-            # print(inversed_DataFrame, self.fitted_object.kind, apply_ndim, apply_dtypes)
-            return self.DataHandler.transform(inversed_DataFrame, apply_kind=self.fitted_object.kind, 
-                    apply_ndim=apply_ndim, apply_dtypes=apply_dtypes)
-        else:
-            apply_kind = inversed_object.kind if kind is None else kind
-            apply_ndim = (inversed_info.ndim if ndim is None else ndim) if inversed_DataFrame.shape[1] == 1 else 2
-            return self.DataHandler.transform(inversed_DataFrame, apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes=dtypes)
-
-    def __repr__(self):
-        return f"(ScalerEncoder) {self.encoder}"
 
 
 
@@ -2276,6 +1762,953 @@ class DS_KFold():
 
 
 ################################################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+# Data 형태 및 정보를 바꿔주는 Class
+class DataHandler:
+    """
+    【required (Library)】 numpy, pandas, collections.namedtuple
+    【required (Function)】vector_info
+
+    < input >
+    . data : Scalar, Vector, (1-D, 2-D) list, matrix, DataFrame
+    . columns : user defined name(columns)  
+                    * {i} auto name sequence
+    . dtypes : setting dtypes manually
+    . ndim : setting ndim manually 
+    . reset_dtype : whether reset_dtype (if True, dtypes are automatically reassigned)
+    . object_threshold : numeric column automatically transform to object (only operate when 'reset_dtype' is True)
+
+    < output >
+    . vector : ('vector_info' : ('data' : {'data': , 'index': , 'name': ]), kind, ndim, dtypes, nuniques)
+    . matrix : ('matrix_info' : ('data' : {'data': , 'index': , 'columns': ]), kind', ndim, dtypes, nunique)
+    """
+    def __init__(self):
+        pass
+    
+    # input data 의 정보(kind, ndim, shape, possible_vector)를 알려주는 함수
+    def data_info(self, data, dict_type=None, save_data=True):
+        data_info_object = namedtuple('data_info', ['frame', 'kind', 'ndim', 'shape', 'possible_vector'])
+
+        if 'list' in str(type(data)):
+            if type(data[0]) == dict:
+                kind = 'dict_records'
+                data_result = pd.DataFrame(data)
+                input_ndim = 2
+            else:
+                kind = 'list'
+                if type(data[0]) == list:
+                    input_ndim = 2
+                    data_result = pd.DataFrame(data)
+                else:
+                    input_ndim = 1
+                    data_result = pd.Series(data)
+        elif 'dict' in str(type(data)):
+            dict_first_value = list(data.values())[0]
+            if type(dict_first_value) == list:
+                kind = 'dict_split' if list(data.keys()) == ['index', 'columns', 'data'] else 'dict_list'
+                input_ndim = 2
+                data_result = pd.DataFrame(data=data['data'], index=data['index'], columns=data['columns']) if kind == 'dict_split' else pd.DataFrame(data)
+            elif 'series' in str(type(dict_first_value)):
+                kind = 'dict_series'
+                input_ndim = 2
+                data_result = pd.DataFrame(data)
+            elif type(dict_first_value) == dict:
+                if dict_type is None:
+                    kind = 'dict_index' if type(list(data.keys())[0]) == int else 'dict'
+                    data = pd.DataFrame(data).T.infer_objects() if kind == 'dict_index' else pd.DataFrame(data)
+                elif dict_type is not None:
+                    kind = 'dict_' + dict_type
+                input_ndim = 2
+                data_result = pd.DataFrame(data)
+            elif sum([d in str(type(dict_first_value)) for d in ['int','float','str','bool']]) > 0:
+                kind = 'dict'
+                input_ndim = 1
+                data_result = pd.Series(data)
+
+        elif 'numpy' in str(type(data)):
+            kind = 'numpy'
+            input_ndim = data.ndim
+            data_result = pd.Series(data) if input_ndim == 1 else pd.DataFrame(data)
+        elif 'pandas' in str(type(data)):
+            kind = 'pandas'
+            input_ndim = data.ndim
+            data_result = pd.Series(data) if input_ndim == 1 else pd.DataFrame(data)
+
+        if input_ndim == 1:
+            possible_vector = True
+        elif data_result.shape[1] == 1:
+            possible_vector = True
+        else:
+            possible_vector = False
+
+        if save_data:
+            frame_data = data_result.to_frame() if input_ndim == 1 else data_result
+        else:
+            frame_data = data_result.shape
+            
+        return data_info_object(frame_data, kind, input_ndim, data_result.shape, possible_vector)
+
+    def possible_vector_verify(self, x):
+        data_info_object = self.data_info(x)
+        if data_info_object.possible_vector == False:
+            raise ValueError("x required only '(n,) Scalar' or '(n,1) Matrix'. ")
+
+    # '(n,) Scalar' or '(n,1) Matrix' 의 name을 추출 및 자동 부여해주는 함수
+    def vector_info_split(self, x, index=None, name=None, dtype=None, reset_dtype=False, object_threshold=3, save_data=True):
+        """
+        【required (Library)】 numpy
+        """
+        data_info_object = self.data_info(x)
+        if data_info_object.possible_vector == False:
+            raise ValueError("x required only '(n,) Scalar' or '(n,1) Matrix'. ")
+
+        # try:
+        vector_instance = namedtuple('vector_info', ['data', 'kind', 'ndim', 'dtypes', 'nuniques'])
+
+        # kind ***
+        kind = data_info_object.kind
+
+        # data ***
+        
+        data_series = data_info_object.frame.iloc[:,0]
+            
+        # nunique ***
+        unique_vector = data_series.drop_duplicates()
+        data = np.array(data_series).ravel()
+        
+        # ndim ***
+        ndim = 1
+
+
+        # index ***
+        if index is not None:
+            if data_info_object.shape[0] != len(index):
+                raise ValueError("The length of index is different.")
+            else:
+                index_result = index
+        else:
+            if type(x) == list:
+                index_result = np.arange(len(x))
+            else:
+                try:
+                    index_result = np.array(x.index)
+                except:
+                    index_result = np.arange(data_info_object.shape[0])
+        
+        # dtype ***
+        if dtype is None:       # auto dtype
+            try:
+                dtype_result = x.dtype
+            except:
+                dtype_result = np.array(x).dtype
+            if reset_dtype and sum([t in str(dtype_result) for t in ['int', 'float']]) > 0:
+                if len(unique_vector) <= object_threshold:
+                    dtype_result = np.array(list(map(str, np.unique(np.array(x))))).dtype
+        elif type(dtype) == dict:
+            dtype_result = list(dtype.values())[0]
+            dtype_result = dtype_result if 'dtype(' in str(type(dtype_result)).lower() else pd.Series(False, dtype=dtype_result).dtype
+        elif type(dtype) == list:
+            dtype_result = list(dtype)[0]
+            dtype_result = dtype_result if 'dtype(' in str(type(dtype_result)).lower() else pd.Series(False, dtype=dtype_result).dtype
+
+        else:
+            dtype_result = dtype if 'dtype' in str(type(dtype)) else pd.Series(True, dtype=dtype).dtype
+
+        # name ***
+        if name is not None:
+            name_result = name[0] if type(name) == list else name
+        else:
+            if data_info_object.kind == 'pandas' or ('dict' in data_info_object.kind and data_info_object.ndim == 2):
+                name_result = list(data_info_object.frame.columns)[0]
+            else:
+              name_result = 'x'
+        
+        # save_data
+        if not save_data:
+            data = data.shape
+        else:
+            data = np.array(data)
+
+        # result ***
+        vector_dict = {}
+        vector_dict['data'] = data
+        vector_dict['index'] = index_result
+        vector_dict['name'] = name_result
+        
+
+        return vector_instance(vector_dict, kind, ndim, dtype_result, len(unique_vector))
+
+    # Data Split : Vector, Matrix Data 를 data, index, name(columns), dtype(s) 로 나눠주는 함수
+    def data_info_split(self, data, index=None, columns=None, dtypes=None, reset_dtypes=False, object_threshold=3, ndim=None, dict_type=None, save_data=True):
+
+        data_info_object = self.data_info(data)
+
+        #####
+        if ndim == 1 or (ndim is None and data_info_object.ndim == 1):  # Scalar or Series
+            return self.vector_info_split(x=data, index=index, name=columns, dtype=dtypes, 
+                                reset_dtype=reset_dtypes, object_threshold=object_threshold)
+
+        elif ndim == 2 or (ndim is None and data_info_object.ndim == 2):  # 2-dim DataFrame
+
+            matrix_instance = namedtuple('matrix_info', ['data', 'kind', 'ndim', 'dtypes', 'nuniques'])
+            # frame_instance = namedtuple('value', ['data', 'index', 'columns'])
+            
+            # kind ***
+            kind = data_info_object.kind
+            
+            # data ***
+            matrix_X = data_info_object.frame
+
+            # ndim ***
+            result_ndim = 2
+
+            # index ***
+            if index is not None:
+                if data_info_object.shape[0] != len(index):
+                    raise ValueError("The length of index is different.")
+                else:
+                    index_result = index
+            else:
+                try:
+                    index_result = np.array(matrix_X.index)
+                except:
+                    index_result = np.arange(matrix_X.shape[0])
+            
+            # columns ***
+            if columns is not None:
+                if '{i}' in columns:
+                    columns_result = [eval(f"f'{columns}'") for i in range(1, matrix_X.shape[1]+1)]
+                else:
+                    if 'str' in str(type(columns)) and data_info_object.possible_vector == True:
+                        columns_result = [columns]
+                    else:
+                        if matrix_X.shape[1] != len(columns) or type(columns) != list:
+                            raise ValueError("'columns' error : the number of input_data's columns is equal to length of 'columns' list.")
+                        else:
+                            columns_result = columns
+            else:
+                if data_info_object.kind == 'pandas' or ('dict' in data_info_object.kind and data_info_object.ndim == 2):
+                    columns_result = list(data_info_object.frame.columns)
+                elif data_info_object.possible_vector == True:
+                    columns_result = ['x']
+                else:
+                    columns_result = ('x'+pd.Series(np.arange(1,matrix_X.shape[1]+1)).astype(str)).tolist()
+                    # [f'x{c}' for c in range(1, np.array(matrix_X).shape[1]+1)]
+
+            # nuniques ***
+            nuniques = pd.DataFrame(matrix_X).apply(lambda x:len(x.value_counts().index) ,axis=0)
+            nuniques.index = columns_result
+
+            # dtypes ***
+            if dtypes is not None:
+                if type(dtypes) == dict:
+                    dtypes_result = dtypes.copy()
+                    try:
+                        dtypes_origin = matrix_X.dtypes
+                    except:
+                        dtypes_origin = pd.DataFrame(np.array(matrix_X)).infer_objects().dtypes
+                    dtypes_origin.index = columns_result
+                    dtypes_origin_dict = dtypes_origin.to_dict()
+
+                    dtypes_dict = {c: d if 'dtype' in str(type(d)) else pd.Series(True, dtype=d).dtype for c, d in dtypes_result.items()}
+                    dtypes_origin_dict.update(dtypes_dict)
+                    dtypes_result = dtypes_origin_dict.copy()
+                elif type(dtypes) == list:
+                    dtypes_result = dtypes.copy()
+                    dtypes_list = [d if 'dtype' in str(type(d)) else pd.Series(True, dtype=d).dtype for d in dtypes_result]
+                    dtypes_result = dict(zip(columns_result, dtypes_list))
+                else:
+                    dtypes_result = dtypes
+                    dtypes_result = {c: pd.Series(True, dtype=dtypes_result).dtype for c in columns_result}
+            else:
+                try:
+                    dtype_series = pd.DataFrame(data).dtypes
+                    dtype_series.index = columns_result
+                    dtypes_result = dtype_series.to_dict()
+                except:
+                    dtypes_origin = pd.DataFrame(np.array(matrix_X)).infer_objects().dtypes
+                    dtypes_origin.index = columns_result
+                    dtypes_result = dtypes_origin.to_dict().copy()
+                
+                if reset_dtypes:
+                    numeric_columns_dict = dict(filter(lambda x: sum([t in str(x) for t in ['int', 'float']]) > 0, dtypes_result.items()))
+                    dtypes_result.update({c: np.array(list(map(str, np.array(matrix_X)[:,list(dtypes_result.keys()).index(c)]))).dtype for c in numeric_columns_dict.keys() if c in nuniques[nuniques<=object_threshold].index})
+            
+            # save_data ***
+            if not save_data:
+                matrix_X = matrix_X.shape
+            else:
+                matrix_X = np.array(matrix_X)
+
+            # result ***
+            matrix_dict = {}
+            matrix_dict['data'] = matrix_X
+            matrix_dict['index'] = index_result
+            matrix_dict['columns'] = columns_result
+        
+            return matrix_instance(matrix_dict, kind, result_ndim, dtypes_result, nuniques.to_dict())
+
+    # Split Object를 data로 바꿔주는 함수
+    def info_to_data(self, instance):
+        """
+        【required (Library)】 numpy, pandas, collections.namedtuple, copy
+        """
+        copy_instance = copy.deepcopy(instance)
+        kind = copy_instance.kind
+        # # kind ***
+        # if kind is None:
+        #     kind = copy_instance.kind
+        
+        # # # name (columns)
+        # # if copy_instance.ndim == 1:
+        # #     columns = [copy_instance.data['name']]
+        # # elif copy_instance.ndim == 2:
+        # #     columns = copy_instance.data['columns']
+
+        # # ndim ***
+        # if ndim == 2:
+        #     if copy_instance.ndim == 1:
+        #         copy_instance = self.data_info_split(copy_instance.data['data'], columns=copy_instance.data['name'], 
+        #                                 ndim=2, dtypes=copy_instance.dtypes, reset_dtypes=reset_dtypes, object_threshold=object_threshold)
+        #         copy_instance = copy_instance._replace(kind=kind)
+
+        # elif ndim == 1:
+        #     if copy_instance.ndim == 2:
+        #         if copy_instance.data['data'].shape[1] > 1:
+        #             raise ValueError("'vector' or 'Series' only allows 1D-Array")
+        #         else:
+        #             copy_instance = self.data_info_split(copy_instance.data['data'], columns=copy_instance.data['columns'][0], 
+        #                 ndim=1, dtypes=copy_instance.dtypes, reset_dtypes=reset_dtypes, object_threshold=object_threshold)
+        #             copy_instance = copy_instance._replace(kind=kind)
+
+        # transform ***
+        if kind == 'numpy':
+            if copy_instance.ndim == 1:
+                return np.array(pd.Series(**copy_instance.data).astype(copy_instance.dtypes))
+            if copy_instance.ndim == 2:
+                return np.array(pd.DataFrame(**copy_instance.data).astype(copy_instance.dtypes))
+        elif kind == 'list':
+            if copy_instance.ndim == 1:
+                    return np.array(pd.Series(**copy_instance.data).astype(copy_instance.dtypes)).tolist()
+            if copy_instance.ndim == 2:
+                return np.array(pd.DataFrame(**copy_instance.data).astype(copy_instance.dtypes)).tolist()
+        elif kind == 'pandas':
+            if copy_instance.ndim == 1:
+                return pd.Series(**copy_instance.data).astype(copy_instance.dtypes)
+            elif copy_instance.ndim == 2:
+                return pd.DataFrame(**copy_instance.data).astype(copy_instance.dtypes)
+        elif 'dict' in kind:
+            if copy_instance.ndim == 1:
+                return pd.Series(**copy_instance.data).astype(copy_instance.dtypes).to_dict()
+            if copy_instance.ndim == 2:
+                pd_frame = pd.DataFrame(**copy_instance.data).astype(copy_instance.dtypes)
+                return pd_frame.to_dict() if kind == 'dict' else pd_frame.to_dict(kind.split('_')[1])
+
+    # Data를 특정 Format에 맞게 바꿔주는 함수
+    def transform(self, data, apply_data=None, apply_instance=None, return_type='data',
+            apply_kind=True, apply_ndim=True, apply_index=False, apply_columns=False, apply_dtypes=True,
+            reset_dtypes=False, object_threshold=3):
+        """
+        < input >
+          . data
+          . apply_data
+          . apply_instance
+          . apply_options : ['name', 'dtypes', 'shape', 'kind'] are allowed
+        """
+        # input_data_info = self.data_info(data)
+        # matrix_data = input_data_info.frame
+
+        if apply_instance is not None:
+            apply_instance = copy.deepcopy(apply_instance)
+        elif apply_data is not None:
+            apply_instance = self.data_info_split(apply_data, save_data=False)
+        else:
+            apply_instance = self.data_info_split(data, save_data=False)
+        to_instance_dict = {}
+
+        if apply_ndim:
+            if type(apply_ndim) != bool:
+                to_instance_dict['ndim'] = apply_ndim
+            else:
+                to_instance_dict['ndim'] = 1 if apply_instance.ndim == 1 else 2
+        if apply_index is not False:
+            if type(apply_index) != bool:
+                to_instance_dict['index'] = apply_index
+            else:
+                to_instance_dict['index'] = apply_instance.data['index']
+        if apply_columns is not False:
+            if type(apply_columns) != bool:
+                to_instance_dict['columns'] = apply_columns
+            else:
+                to_instance_dict['columns'] = apply_instance.data['name'] if apply_instance.ndim == 1 else apply_instance.data['columns']
+        if apply_dtypes is not False and reset_dtypes is False:
+            if type(apply_dtypes) != bool:
+                to_instance_dict['dtypes'] = apply_dtypes
+            else:
+                to_instance_dict['dtypes'] = apply_instance.dtypes if apply_instance.ndim == 1 else list(apply_instance.dtypes.values())
+        # elif apply_dtypes is True and  reset_dtypes is False:
+
+        result_instance = self.data_info_split(data, **to_instance_dict, reset_dtypes=reset_dtypes, object_threshold=object_threshold)
+        
+        if apply_kind:
+            if type(apply_kind) != bool:
+                result_instance = result_instance._replace(kind=apply_kind)
+            else:
+                result_instance = result_instance._replace(kind=apply_instance.kind)
+
+        if return_type == 'data':
+            return self.info_to_data(result_instance)
+        elif return_type == 'instance':
+            return result_instance
+        elif return_type == 'all':
+            return {'data': self.info_to_data(result_instance), 'instance': result_instance}
+
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+# Tabular(or 2D-matrix) Data에서 여러 dtype에 대해 유연하게 LabelEncoding을 적용하는 Class
+class TabularLabelEncoder:
+    def __init__(self, nan_value=-1, unseen_as_nan=False):
+        self.encoders = {}
+        self.feature_names = None
+        self.nan_replacements = {}
+        self.original_dtypes = {}
+        self.nan_value = nan_value
+        self.unseen_as_nan = unseen_as_nan
+    
+    def fit(self, X):
+        if isinstance(X, pd.DataFrame):
+            self.feature_names = list(X.columns)
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            self.feature_names = list(range(X.shape[1]))
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        for col in self.feature_names:
+            col_data = data[col]
+            self.original_dtypes[col] = col_data.dtype
+            
+            # object dtype이지만 내부 값이 전부 숫자면 숫자로 처리
+            if col_data.dtype == object:
+                try:
+                    col_data = pd.to_numeric(col_data)
+                except ValueError:
+                    pass
+            
+            le = LabelEncoder()
+            
+            if np.issubdtype(col_data.dtype, np.floating):
+                replacement = self.nan_value
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement).astype(np.int64)
+            elif np.issubdtype(col_data.dtype, np.integer):
+                replacement = self.nan_value
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement)
+            elif col_data.dtype == object:
+                replacement = '__missing__'
+                self.nan_replacements[col] = replacement
+                col_data = col_data.fillna(replacement)
+            else:
+                raise ValueError(f"Unsupported dtype for column {col}: {col_data.dtype}")
+            
+            le.fit(col_data)
+            self.encoders[col] = le
+        
+        return self
+    
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        transformed = pd.DataFrame(index=data.index)
+        
+        for col in self.feature_names:
+            col_data = data[col]
+            
+            if col_data.dtype == object:
+                try:
+                    col_data = pd.to_numeric(col_data)
+                except ValueError:
+                    pass
+            
+            replacement = self.nan_replacements[col]
+            col_data = col_data.fillna(replacement)
+            
+            le = self.encoders[col]
+            known_classes = set(le.classes_)
+            
+            if self.unseen_as_nan:
+                # unseen 값을 NaN 대체값으로 변환
+                col_data = col_data.apply(lambda x: x if x in known_classes else replacement)
+                transformed[col] = le.transform(col_data)
+            else:
+                # unseen 값을 새로운 category로 추가
+                unseen_values = set(col_data) - known_classes
+                if unseen_values:
+                    le.classes_ = np.append(le.classes_, list(unseen_values))
+                transformed[col] = le.transform(col_data)
+        
+        return transformed
+    
+    def inverse_transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            data = X.copy()
+        elif isinstance(X, np.ndarray):
+            data = pd.DataFrame(X)
+        else:
+            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+        
+        inversed = pd.DataFrame(index=data.index)
+        
+        for col in self.feature_names:
+            le = self.encoders[col]
+            decoded = le.inverse_transform(data[col])
+            replacement = self.nan_replacements[col]
+            
+            decoded = np.where(decoded == replacement, np.nan, decoded)
+            inversed[col] = decoded
+        
+        return inversed
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
+    def __repr__(self):
+        repr_str = "<customize.TabularLabelEncoder>"
+        if len(self.encoders) > 0:
+            encoders_str = '\n'.join([f"  {k}: {v}" for k, v in self.encoders.items()])
+            return repr_str + '\n{\n' + encoders_str + '\n}'
+        else:
+            return repr_str
+
+
+
+# ('matrix_info' : ('frame_info' : ['data', 'index', 'columns']), kind, dtypes, nuniques)
+# Vector 형태 (1차원 vector 또는 (-1,1) Shpaed Matrix)의 숫자형 데이터에 Scaler를 적용하는 Class
+class ScalerVector:
+    """
+    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy
+    【required (Function)】DataHandler, class_object_execution
+
+    < Input >
+     . scaler : Scaler Object or String
+                * required: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
+     . x : '1dim vector' or '(-1, 1)shaped matrix'
+
+    < Method >
+     . fit
+     . transform
+     . fit_transform
+     . inverse_transform
+    """
+    def __init__(self, scaler='StandardScaler', **kwargs):
+        self.name = 'Undefined'
+        self.scaler = class_object_execution(scaler, **kwargs)
+        self.DataHandler = DataHandler()
+
+    def fit(self, x):
+        fitted_info = self.DataHandler.data_info(x, save_data=False)
+        self.fitted_ndim = fitted_info.ndim
+        self.fitted_object = self.DataHandler.vector_info_split(x)
+        self.scaler.fit(self.fitted_object.data['data'].reshape(-1,1))
+        self.name = self.fitted_object.data['name']
+        self.transformed_names = [self.name]
+
+    def transform(self, x, fitted_format=False, apply_name=False, ndim=None, kind=None):
+        transformed_info = self.DataHandler.data_info(x, save_data=False)
+        transformed_object = self.DataHandler.vector_info_split(x)
+        transformed_data = self.scaler.transform(transformed_object.data['data'].reshape(-1,1))
+
+        if fitted_format:
+            apply_name = transformed_object.data['name'] if apply_name is False else apply_name
+            return self.DataHandler.transform(transformed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
+                apply_ndim=self.fitted_ndim, apply_index=transformed_object.data['index'], apply_dtypes='float')
+        else:
+            apply_kind = True if kind is None else kind
+            apply_ndim = transformed_info.ndim if ndim is None else ndim
+            return self.DataHandler.transform(transformed_data, apply_instance=transformed_object, apply_columns=True,
+                apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes='float')
+
+    def fit_transform(self, x, ndim=None, kind=None):
+        self.fit(x)
+        fitted_format = True if ndim is None and kind is None else False
+        return self.transform(x, fitted_format=fitted_format, apply_name=True, ndim=ndim, kind=kind)
+
+    def inverse_transform(self, x, fitted_format=True, apply_name=False, ndim=None, kind=None, dtypes=None):
+        inversed_info = self.DataHandler.data_info(x, save_data=False)
+        inversed_object = self.DataHandler.vector_info_split(x)
+        inversed_data = self.scaler.inverse_transform(inversed_object.data['data'].reshape(-1,1))
+
+        if fitted_format:
+            apply_name = inversed_object.data['name'] if apply_name is False else apply_name
+            # apply_kind = self.fitted_object.kind if kind is None else kind
+            apply_ndim = self.fitted_ndim
+            apply_dtypes = dtypes if dtypes is not None else True
+            return self.DataHandler.transform(inversed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
+                apply_ndim=apply_ndim,
+                apply_dtypes=apply_dtypes, apply_index=inversed_object.data['index'])
+        else:
+            apply_name = inversed_object.data['name'] if apply_name is False else apply_name
+            apply_kind = True if kind is None else kind
+            apply_ndim = inversed_info.ndim if ndim is None else ndim
+            apply_dtypes = dtypes if dtypes is not None else self.fitted_object.dtypes
+            return self.DataHandler.transform(inversed_data, apply_instance=inversed_object, apply_columns=apply_name,
+                apply_kind=apply_kind, apply_ndim=apply_ndim, 
+                apply_dtypes=apply_dtypes, apply_index=True)
+
+    def __repr__(self):
+        return f"(ScalerInstance) {self.name}: {self.scaler}"
+
+
+# Vector 형태 (1차원 vector 또는 (-1,1) Shpaed Matrix)의 문자형 데이터에 Encoder를 적용하는 Class
+class EncoderVector:
+    """
+    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy
+    【required (Function)】DataHandler, class_object_execution
+
+    < Input >
+     . encoder : Scaler Object or String
+                * required: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
+     . x : '1dim vector' or '(-1, 1)shaped matrix'
+
+    < Method >
+     . fit
+     . transform
+     . fit_transform
+     . inverse_transform
+     . get_params
+     . get_feature_names_out
+    """
+    def __init__(self, encoder='OneHotEncoder', **kwargs):
+        self.name='undefined'
+
+        if 'OneHotEncoder' in str(encoder):
+            if 'drop' not in kwargs.keys():
+                kwargs.update({'drop':'first'})
+            if 'sparse' not in kwargs.keys():
+                kwargs.update({'sparse':False})
+        # self.kwargs = kwargs
+        self.DataHandler = DataHandler()
+        self.encoder = class_object_execution(encoder, **kwargs)
+
+    def fit(self, x):
+        encoder_str = str(self.encoder)
+        fitted_info = self.DataHandler.data_info(x, save_data=False)
+        self.fitted_ndim = fitted_info.ndim
+        self.fitted_object = self.DataHandler.vector_info_split(x)
+        fitted_series = pd.Series(**self.fitted_object.data)
+        # fitted_series = pd.Series(**self.fitted_object.data).apply(lambda x: str(x))
+        
+        if 'OneHotEncoder' in encoder_str:
+            self.encoder.fit(fitted_series.to_frame())
+            try:
+                self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
+            except:
+                self.transformed_names = list(map(lambda x: str(self.fitted_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
+        elif 'LabelEncoder' in encoder_str:
+            self.encoder.fit(fitted_series)
+            self.transformed_names = [self.fitted_object.data['name']]
+        elif 'OrdinalEncoder' in encoder_str:
+            self.encoder.fit(fitted_series.to_frame())
+            self.transformed_names = [self.fitted_object.data['name']]
+
+        self.name = self.fitted_object.data['name']
+
+    def transform(self, x, fitted_format=False, apply_name=False, ndim=None, kind=None):
+        encoder_str = str(self.encoder)
+        transformed_info = self.DataHandler.data_info(x, save_data=False)
+        transformed_object = self.DataHandler.vector_info_split(x)
+        transformed_series = pd.Series(**transformed_object.data)
+        # transformed_series = pd.Series(**transformed_object.data).apply(lambda x: str(x))
+        if 'OneHotEncoder' in encoder_str or 'OrdinalEncoder' in encoder_str:
+            transformed_data = self.encoder.transform(transformed_series.to_frame())
+        elif 'LabelEncoder' in encoder_str:
+            transformed_data = self.encoder.transform(transformed_series)
+        
+        # name
+        if (fitted_format is True) or (apply_name is True):
+            apply_name = self.transformed_names
+        elif apply_name is False:
+            if 'OneHotEncoder' in encoder_str:
+                try:
+                    apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names_out()))
+                except:
+                    apply_name = list(map(lambda x: str(transformed_object.data['name']) + str(x)[2:], self.encoder.get_feature_names()))
+            else:
+                apply_name = [transformed_object.data['name']]
+        else:
+            if 'OneHotEncoder' in encoder_str:
+                try:
+                    apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names_out()))
+                except:
+                    apply_name = list(map(lambda x: str(apply_name) + str(x)[2:], self.encoder.get_feature_names()))
+            else:
+                apply_name = apply_name
+
+        # transform
+        if 'OneHotEncoder' not in encoder_str:
+            apply_name = apply_name[0]
+            if fitted_format:
+                return self.DataHandler.transform(transformed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
+                            apply_ndim=self.fitted_ndim, apply_index=transformed_object.data['index'], apply_dtypes='int')
+            else:
+                apply_kind = True if kind is None else kind
+                apply_ndim = transformed_info.ndim if ndim is None else ndim
+                return self.DataHandler.transform(transformed_data, apply_instance=transformed_object, apply_columns=True,
+                    apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes='int')
+        else:       # OneHotEncoder
+            parmas = self.encoder.get_params()
+            if parmas['sparse']:
+                transformed_data = transformed_data.toarray()
+            
+            if fitted_format:
+                # apply_kind = self.fitted_object.kind if kind is None else kind
+                apply_ndim = self.fitted_ndim if transformed_data.shape[1] == 1 else 2
+                return self.DataHandler.transform(transformed_data, apply_kind=self.fitted_object.kind, apply_columns=apply_name,
+                    apply_ndim=apply_ndim, apply_index=transformed_object.data['index'], apply_dtypes='int')
+            else:
+                apply_kind = transformed_object.kind if kind is None else kind
+                apply_ndim = (transformed_info.ndim if ndim is None else ndim) if transformed_data.shape[1] == 1 else 2
+
+                return self.DataHandler.transform(transformed_data, apply_kind=apply_kind, apply_columns=apply_name,
+                    apply_ndim=apply_ndim, apply_index=transformed_object.data['index'], apply_dtypes='int')
+
+    def fit_transform(self, x, ndim=None, kind=None):
+        self.fit(x)
+        fitted_format = True if ndim is None and kind is None else False
+        return self.transform(x, fitted_format=fitted_format, apply_name=True, ndim=ndim, kind=kind)
+
+    def inverse_transform(self, x, fitted_format=True, apply_name=False, ndim=None, kind=None, dtypes=None):
+        encoder_str = str(self.encoder)
+        inversed_info = self.DataHandler.data_info(x, save_data=False)
+        inversed_object = self.DataHandler.data_info_split(x, ndim=2)
+        inversed_data = self.encoder.inverse_transform(inversed_object.data['data'])
+
+        # name
+        if (fitted_format is True) or (apply_name is True):
+            apply_name = self.fitted_object.data['name']
+        elif apply_name is False:
+            if 'OneHotEncoder' in encoder_str:
+                apply_name = list(map(lambda x: x[:x.rfind('_')], inversed_object.data['columns']))[0]
+            else:
+                apply_name = inversed_object.data['columns']
+        else:
+            apply_name = apply_name if type(apply_name) == list else [apply_name]
+
+        if fitted_format:
+            apply_dtypes = dtypes if dtypes is not None else True
+            return self.DataHandler.transform(inversed_data, apply_instance=self.fitted_object, apply_columns=apply_name,
+                apply_ndim=self.fitted_ndim, apply_index=inversed_object.data['index'], apply_dtypes=apply_dtypes)
+        else:
+            apply_kind = True if kind is None else kind
+            apply_ndim = inversed_info.ndim if ndim is None else ndim
+            apply_dtypes = dtypes if dtypes is not None else False
+            
+            return self.DataHandler.transform(inversed_data, apply_instance=inversed_object, apply_columns=apply_name,
+                apply_kind=apply_kind, apply_ndim=apply_ndim, 
+                apply_dtypes=apply_dtypes, apply_index=True)
+
+    def get_params(self):
+        return self.encoder.get_params()
+
+    def get_feature_names_out(self):
+        return np.array(self.transformed_names)
+
+    def __repr__(self):
+        return f"(EncoderInstance) {self.name}: {self.encoder}"
+
+
+
+
+### ★★★ ###
+# Matrix/Frame/DataFrame 데이터에 Scaler 또는 Encoder를 적용하는 Class
+class ScalerEncoder:
+    """
+    【required (Library)】 numpy, pandas, sklearn.preprocessing.*, copy.deepcopy, functools.reduce
+    【required (Function)】DataHandler, class_object_execution, ScalerVector, EncoderVector, dtypes_split
+
+    < Input >
+     . encoder : dictionay type {'columns' : Scaler/Encoder Object or String, ...}
+                      (default) {'#numeric' : 'StandardScaler', '#object':'OneHotEncoder', '#time', 'StandardScaler'}
+                * required Scaler/Encoder: 'str type Name_of_Class', 'str type Name_of_Instance', 'Class object', 'instance object'
+     . X : 1dim, 2dim vector or matrix
+
+    < Method >
+     . fit
+     . transform
+     . fit_transform
+     . inverse_transform
+    """
+    def __init__(self, encoder=None, **kwargs):
+        self.apply_encoder = {'#numeric':'StandardScaler', '#object':'OneHotEncoder', '#time': 'StandardScaler'}
+        if encoder is not None:
+            self.apply_encoder.update(encoder)
+
+        self.DataHandler = DataHandler()
+        self.kwargs = kwargs
+        self.encoder = {}
+        self.match_columns = {}
+
+    def fit(self, X):
+        self.encoder = {}
+
+        fitted_info = self.DataHandler.data_info(X, save_data=False)
+        self.fitted_ndim = fitted_info.ndim
+        self.fitted_object = self.DataHandler.data_info_split(X, ndim=2)
+
+        fitted_DataFrame = pd.DataFrame(**self.fitted_object.data).astype(self.fitted_object.dtypes)
+        
+        self.columns_dtypes = pd.DataFrame(dtypes_split(fitted_DataFrame, return_type='columns_all')).T
+
+        for c in fitted_DataFrame:
+            if c in self.apply_encoder.keys():
+                if 'scaler' in str(self.apply_encoder[c]).lower():
+                    se = ScalerVector(scaler=self.apply_encoder[c])
+                elif 'encoder' in str(self.apply_encoder[c]).lower():
+                    se = EncoderVector(encoder=self.apply_encoder[c])
+            else:
+                apply_se = self.apply_encoder['#' + self.columns_dtypes.loc[c, 'dtype_group']]
+                if 'scaler' in str(apply_se).lower():
+                    se = ScalerVector(scaler=apply_se)
+                elif 'encoder' in str(apply_se).lower():
+                    se = EncoderVector(encoder=apply_se)
+            se.fit(fitted_DataFrame[c])
+            self.encoder[c] = copy.deepcopy(se)
+            self.match_columns[c] = se.transformed_names
+
+    def transform(self, X, fitted_format=False, columns=None, ndim=None, kind=None):
+        transformed_info = self.DataHandler.data_info(X, save_data=False)
+        transformed_object = self.DataHandler.data_info_split(X, ndim=2)
+        
+        X_DataFrame = pd.DataFrame(**transformed_object.data).astype(transformed_object.dtypes)
+        if transformed_object.kind != 'pandas':
+            X_DataFrame.columns = self.encoder.keys() if columns is None else columns
+        
+        # transform ***
+        transformed_DataFrame = pd.DataFrame()
+        for c in X_DataFrame:
+            transformed_columnvector = pd.DataFrame(self.encoder[c].transform(X_DataFrame[c], fitted_format=True))
+            transformed_DataFrame = pd.concat([transformed_DataFrame, transformed_columnvector], axis=1)
+        
+        # return ***
+        if fitted_format:
+            apply_ndim = self.fitted_ndim if transformed_DataFrame.shape[1] == 1 else 2
+            return self.DataHandler.transform(transformed_DataFrame, apply_kind=self.fitted_object.kind, apply_ndim=apply_ndim)
+        else:
+            apply_kind = transformed_object.kind if kind is None else kind
+            apply_ndim = (transformed_info.ndim if ndim is None else ndim) if transformed_DataFrame.shape[1] == 1 else 2
+            return self.DataHandler.transform(transformed_DataFrame, apply_kind=apply_kind, apply_ndim=apply_ndim)
+        
+    def fit_transform(self, X, ndim=None, kind=None):
+        self.fit(X)
+        fitted_format = True if ndim is None and kind is None else False
+        return self.transform(X, fitted_format=fitted_format, ndim=ndim, kind=kind)
+
+    def inverse_transform(self, X, fitted_format=False, columns=None, ndim=None, kind=None, dtypes=None):
+        inversed_info = self.DataHandler.data_info(X, save_data=False)
+        inversed_object = self.DataHandler.data_info_split(X, ndim=2)
+        
+        X_DataFrame = pd.DataFrame(**inversed_object.data).astype(inversed_object.dtypes)
+        if inversed_object.kind != 'pandas':
+            X_DataFrame.columns = reduce(lambda x,y : x + y, self.match_columns.values()) if columns is None else columns
+
+        Xcolumns = copy.deepcopy(X_DataFrame.columns)
+        match_columns = copy.deepcopy(self.match_columns)
+
+        # inverse_transform ***
+        inversed_DataFrame = pd.DataFrame()
+        while bool(len(Xcolumns)):
+            inversed_target = pd.DataFrame()
+
+            c = Xcolumns[0]
+            Xcolumns = Xcolumns.drop(c)
+            # print(c, Xcolumns)
+            if type(dtypes) == dict:
+                if c in dtypes:
+                    apply_dtypes = dtypes[c]
+                else:
+                    apply_dtypes = None
+            else:       # bool, str, dtype
+                apply_dtypes = dtypes
+
+            for fc, tc in match_columns.items():
+                if c in tc:
+                    inversed_target = X_DataFrame[tc]
+
+                    del match_columns[fc]
+                    tc.remove(c)
+                    Xcolumns = Xcolumns.drop(tc)
+                    
+                    inversed_data = self.encoder[fc].inverse_transform(inversed_target, fitted_format=fitted_format, ndim=2, dtypes=apply_dtypes)
+                    inversed_data.columns = [self.encoder[fc].name]
+
+                    inversed_DataFrame = pd.concat([inversed_DataFrame, inversed_data], axis=1)
+                    break
+            
+            if c == X_DataFrame.columns[-1]:
+                break
+            
+        # return ***
+        if fitted_format:
+            apply_ndim = self.fitted_ndim if inversed_DataFrame.shape[1] == 1 else 2
+            # apply_dtypes = dict(filter(lambda x: x[0] in X_DataFrame.columns, self.fitted_object.dtypes.items()))
+            apply_dtypes = dict(filter(lambda x: x[0] in inversed_DataFrame.columns, self.fitted_object.dtypes.items()))
+            # print(inversed_DataFrame, self.fitted_object.kind, apply_ndim, apply_dtypes)
+            return self.DataHandler.transform(inversed_DataFrame, apply_kind=self.fitted_object.kind, 
+                    apply_ndim=apply_ndim, apply_dtypes=apply_dtypes)
+        else:
+            apply_kind = inversed_object.kind if kind is None else kind
+            apply_ndim = (inversed_info.ndim if ndim is None else ndim) if inversed_DataFrame.shape[1] == 1 else 2
+            return self.DataHandler.transform(inversed_DataFrame, apply_kind=apply_kind, apply_ndim=apply_ndim, apply_dtypes=dtypes)
+
+    def __repr__(self):
+        return f"(ScalerEncoder) {self.encoder}"
+
+
+
+
+
+
+
 
 
 
