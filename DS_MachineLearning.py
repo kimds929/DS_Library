@@ -560,13 +560,14 @@ class DS_StandardScaler:
     - np.nanmean / np.nanstd 기반의 Standard Scaling
     - DataFrame / ndarray 모두 지원
     - axis에 따라 다차원에서도 유연하게 동작
-        * axis=None      : 전체에 대해 스칼라 mean / std
-        * axis=k (int)   : 해당 축에 대해 mean / std (keepdims=True로 브로드캐스팅 가능)
+        * axis=None      : 전체 차원에 대해 scalar mean / std
+        * axis=k (int)   : 해당 축에 대해 mean / std (keepdims=True로 브로드캐스팅)
+        * axis=(i,j,k, ...)      : (i,j,k) 차원에 대해 mean / std (keepdims=True로 브로드캐스팅)
     - fit 시 입력 타입 / shape / feature_names 기록해서
       inverse_transform에서 최대한 원래 형태로 복원
     """
 
-    def __init__(self, axis=None, eps=1e-8, with_mean=True, with_std=True):
+    def __init__(self, axis=0, eps=1e-8, with_mean=True, with_std=True):
         """
         axis   : np.nanmean / np.nanstd에 전달할 axis
                  - None 이면 전체에 대해 스칼라 mean / std
