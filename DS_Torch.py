@@ -72,6 +72,7 @@ class TorchDataLoader():
 
 
 
+
 class TorchModeling():
     """
     self.__init__(model, device)
@@ -293,29 +294,31 @@ class TorchModeling():
             if test_loader is not None and len(test_loader) > 0:
                 self.model.eval()
                 
+                test_batch_lens = []
                 test_epoch_loss = []
                 test_epoch_metrics = []
                 test_iter = tqdm(enumerate(test_loader), desc="Valid Batch", total=len(test_loader), position=1, leave=False) if tqdm_display else enumerate(test_loader)
                 for batch_idx, (batch) in test_iter:
+                    batch_len = len(batch[0])
                     batch_device = (batch_data.to(self.device) for batch_data in batch)
                     
                     loss = self.loss_function(self.model, batch_device)
-                
+
+                    test_batch_lens.append( batch_len )
                     test_epoch_loss.append( loss.to('cpu').detach().numpy() )
                     if self.metrics_function is not None:
                         test_epoch_metrics.append( self.metrics_function(self.model, batch_device) )
 
-                print_info['test_loss'] = np.mean(test_epoch_loss)
+                print_info['test_loss'] = (np.array(test_epoch_loss) * np.array(test_batch_lens)).sum() / sum(test_batch_lens)
                 self.test_losses.append(print_info['test_loss'])
                 if self.metrics_function is not None:
-                    print_info['test_metrics'] = np.mean(test_epoch_metrics)
+                    print_info['test_metrics'] = (np.array(test_epoch_metrics) * np.array(test_batch_lens)).sum() / sum(test_batch_lens)
                     self.test_metrics.append(print_info['test_metrics'])
             print_sentences = ",  ".join([f"{k}: {str(self.fun_decimal_point(v))}" for k, v in print_info.items() if k != 'epoch'])
             if verbose > 0:
                 print(f"[{self.model_t-1} epoch test performances] {print_sentences}")
             self.test_info.append(print_info)
         return print_info
-
 
 # def gaussian_loss(model, x, y):
 #     mu, logvar = model(x)
