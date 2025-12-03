@@ -191,97 +191,84 @@ from sklearn.preprocessing import LabelEncoder
 
 
 class DS_LabelEncoder:
-    """
-    - 원래 의도: 2D tabular data (DataFrame / ndarray)에 대해 컬럼별 LabelEncoder를 적용
-    - 확장:
-        * DataFrame: 기존과 동일하게 2D 컬럼별 인코딩
-        * ndarray(1D/2D/3D/... ND):
-            - 마지막 축을 feature 축으로 보고, 나머지 축은 모두 sample 축으로 flatten
-            - shape (..., n_features) -> (-1, n_features) 로 펴서 각 feature별 LabelEncoder 적용
-            - transform 후 다시 원래 shape로 reshape
-            - inverse_transform도 동일한 방식으로 복원
-    """
-
     def __init__(self, nan_value=-1, unseen_as_nan=False):
-        self.encoder = {}              # col_name -> LabelEncoder
-        self.feature_names = None      # 마지막 축의 feature 이름
-        self.nan_replacements = {}     # col_name -> nan 대체값
-        self.original_dtypes = {}      # col_name -> dtype
+        self.encoder = {}
+        self.feature_names = None
+        self.nan_replacements = {}
+        self.original_dtypes = {}
         self.nan_value = nan_value
         self.unseen_as_nan = unseen_as_nan
+        self.missing_category_index = {}
+        self.numeric_only_features = set()  # 숫자 변환만 한 feature 저장
 
-        self.input_type_ = None        # "dataframe" or "ndarray"
-        self.original_shape_ = None    # ndarray일 때 원본 shape 저장
+        self.input_type_ = None
+        self.original_shape_ = None
+        self.total_elements_ = None 
         self._fitted = False
 
-    # -----------------------
-    # 내부 유틸
-    # -----------------------
     def _to_2d_dataframe_for_fit(self, X):
-        """
-        fit 시 입력을 2D DataFrame으로 통일해서 처리하는 헬퍼.
-        - DataFrame이면 그대로 (shape: (n_samples, n_features))
-        - ndarray면 마지막 축을 feature 축으로 보고 flatten:
-            shape: (..., C) -> (-1, C)
-        """
-        if isinstance(X, pd.DataFrame):
+        self.original_shape_ = X.shape
+        self.total_elements_ = np.prod(X.shape)
+
+        if isinstance(X, pd.Series):
+            self.input_type_ = "series"
+            col_name = X.name if X.name is not None else "x_cat_1"
+            self.feature_names = [col_name]
+            return pd.DataFrame(X, columns=self.feature_names)
+
+        elif isinstance(X, pd.DataFrame):
             self.input_type_ = "dataframe"
-            self.original_shape_ = X.shape  # (n_samples, n_features)
             self.feature_names = list(X.columns)
             return X.copy()
 
         elif isinstance(X, np.ndarray):
             self.input_type_ = "ndarray"
-            self.original_shape_ = X.shape
-
             if X.ndim == 1:
-                # (N,) -> (N, 1)
                 X_2d = X.reshape(-1, 1)
+                num_features = 1
             else:
-                # (..., C)에서 마지막 축을 feature 축으로 간주
                 last_dim = X.shape[-1]
                 X_2d = X.reshape(-1, last_dim)
-
-            # 컬럼 이름: x_cat_1, x_cat_2, ...
-            self.feature_names = [f"x_cat_{i+1}" for i in range(X_2d.shape[1])]
+                num_features = last_dim
+            
+            self.feature_names = [f"x_cat_{i+1}" for i in range(num_features)]
             return pd.DataFrame(X_2d, columns=self.feature_names)
 
         else:
-            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+            raise TypeError("Input must be pandas.DataFrame, pandas.Series, or numpy.ndarray")
 
     def _to_2d_dataframe_for_transform(self, X):
-        """
-        transform / inverse_transform 공용 헬퍼
-        - DataFrame이면 그대로 사용
-        - ndarray면 fit과 동일하게 마지막 축을 feature 축으로 보고 flatten
-        """
-        if isinstance(X, pd.DataFrame):
-            return X.copy(), X.shape, "dataframe"
+        if not self._fitted and self.feature_names is None:
+            raise RuntimeError("DS_LabelEncoder is not fitted yet or feature names are missing.")
+
+        orig_shape = X.shape
+        input_kind = None
+
+        if isinstance(X, pd.Series):
+            input_kind = "series"
+            col_name = X.name if X.name is not None else "x_cat_1"
+            df = pd.DataFrame(X, columns=[col_name])
+            return df, orig_shape, input_kind
+
+        elif isinstance(X, pd.DataFrame):
+            input_kind = "dataframe"
+            return X.copy(), orig_shape, input_kind
 
         elif isinstance(X, np.ndarray):
-            orig_shape = X.shape
-
+            input_kind = "ndarray"
             if X.ndim == 1:
                 X_2d = X.reshape(-1, 1)
             else:
                 last_dim = X.shape[-1]
                 X_2d = X.reshape(-1, last_dim)
-
-            # fit 때의 feature_names 기준으로 DataFrame 생성
-            if self.feature_names is None:
-                cols = [f"x_cat_{i+1}" for i in range(X_2d.shape[1])]
-            else:
-                cols = self.feature_names
-
+            
+            cols = self.feature_names
             df = pd.DataFrame(X_2d, columns=cols)
-            return df, orig_shape, "ndarray"
+            return df, orig_shape, input_kind
 
         else:
-            raise TypeError("Input must be pandas.DataFrame or numpy.ndarray")
+            raise TypeError("Input must be pandas.DataFrame, pandas.Series, or numpy.ndarray")
 
-    # -----------------------
-    # fit / transform / inverse
-    # -----------------------
     def fit(self, X):
         data = self._to_2d_dataframe_for_fit(X)
 
@@ -289,36 +276,34 @@ class DS_LabelEncoder:
             col_data = data[col]
             self.original_dtypes[col] = col_data.dtype
 
-            # object지만 전부 숫자면 숫자로 캐스팅
+            # object라도 숫자로 변환 가능하면 변환 후 LabelEncoder 미사용
             if col_data.dtype == object:
                 try:
-                    col_data = pd.to_numeric(col_data)
+                    col_data_num = pd.to_numeric(col_data)
+                    col_data = col_data_num
+                    self.numeric_only_features.add(col)  # 숫자 변환만 한 feature
                 except ValueError:
                     pass
 
-            le = LabelEncoder()
-
-            # dtype별 NaN 처리 전략
-            if np.issubdtype(col_data.dtype, np.floating):
+            if np.issubdtype(col_data.dtype, np.floating) or np.issubdtype(col_data.dtype, np.integer):
                 replacement = self.nan_value
-                self.nan_replacements[col] = replacement
-                col_data = col_data.fillna(replacement).astype(np.int64)
-
-            elif np.issubdtype(col_data.dtype, np.integer):
-                replacement = self.nan_value
-                self.nan_replacements[col] = replacement
-                col_data = col_data.fillna(replacement)
-
             elif col_data.dtype == object:
                 replacement = "__missing__"
-                self.nan_replacements[col] = replacement
-                col_data = col_data.fillna(replacement)
-
             else:
                 raise ValueError(f"Unsupported dtype for column {col}: {col_data.dtype}")
+            
+            self.nan_replacements[col] = replacement
 
-            le.fit(col_data)
-            self.encoder[col] = le
+            if col in self.numeric_only_features:
+                # LabelEncoder 사용 안 함
+                self.encoder[col] = None
+                self.missing_category_index[col] = np.nan  # 사용 안 함
+            else:
+                non_missing_data = col_data[col_data != replacement]
+                le = LabelEncoder()
+                le.fit(non_missing_data)
+                self.encoder[col] = le
+                self.missing_category_index[col] = len(le.classes_)
 
         self._fitted = True
         return self
@@ -333,46 +318,38 @@ class DS_LabelEncoder:
         for col in self.feature_names:
             col_data = data[col]
 
-            # object인데 숫자만 있으면 numeric으로
-            if col_data.dtype == object:
-                try:
-                    col_data = pd.to_numeric(col_data)
-                except ValueError:
-                    pass
-
-            replacement = self.nan_replacements[col]
-            col_data = col_data.fillna(replacement)
-
-            le = self.encoder[col]
-            known_classes = set(le.classes_)
-
-            if self.unseen_as_nan:
-                # unseen → NaN 대체값으로 치환 후 transform
-                col_data = col_data.apply(
-                    lambda x: x if x in known_classes else replacement
-                )
-                transformed[col] = le.transform(col_data)
+            if col in self.numeric_only_features:
+                # 숫자 변환만 수행
+                col_data = pd.to_numeric(col_data, errors="coerce")
+                replacement = self.nan_replacements[col]
+                col_data = col_data.fillna(replacement)
+                transformed[col] = col_data
             else:
-                # unseen → 새로운 category로 추가
-                unseen_values = set(col_data) - known_classes
-                if unseen_values:
-                    le.classes_ = np.append(le.classes_, list(unseen_values))
-                transformed[col] = le.transform(col_data)
+                if col_data.dtype == object:
+                    try:
+                        col_data = pd.to_numeric(col_data)
+                    except ValueError:
+                        pass
+
+                replacement = self.nan_replacements[col]
+                missing_idx = self.missing_category_index[col]
+                le = self.encoder[col]
+                known_classes = set(le.classes_)
+
+                def encode_value(x):
+                    if pd.isna(x) or x == replacement:
+                        return missing_idx
+                    if self.unseen_as_nan and x not in known_classes:
+                        return missing_idx
+                    try:
+                        return le.transform([x])[0]
+                    except ValueError:
+                        return missing_idx 
+
+                transformed[col] = col_data.apply(encode_value)
 
         arr = np.array(transformed)
-
-        # 원래 ndarray였으면 shape 복원
-        if input_kind == "ndarray":
-            # original_shape_: (..., C), arr.shape: (N_flat, C)
-            # 원소 수는 그대로고 last_dim도 동일하다고 가정
-            if len(orig_shape) == 1:
-                # (N,)->(N,1)로 펴서 인코딩했으니 다시 (N,)로
-                return arr.reshape(orig_shape)
-            else:
-                return arr.reshape(orig_shape)
-        else:
-            # DataFrame 입력이면 그냥 2D ndarray 반환
-            return arr
+        return arr.reshape(orig_shape)
 
     def inverse_transform(self, X):
         if not self._fitted:
@@ -381,42 +358,47 @@ class DS_LabelEncoder:
         data_2d, orig_shape, input_kind = self._to_2d_dataframe_for_transform(X)
         inversed = pd.DataFrame(index=data_2d.index)
 
-        for col in self.feature_names:
-            le = self.encoder[col]
-            decoded = le.inverse_transform(data_2d[col])
-            replacement = self.nan_replacements[col]
-
-            decoded = np.where(decoded == replacement, np.nan, decoded)
-            inversed[col] = decoded
-
-        if input_kind == "ndarray":
-            # ndarray로 다시 변환 + 원래 shape로 reshape
-            arr = inversed.to_numpy()
-
-            if len(orig_shape) == 1:
-                # (N,1) -> (N,)
-                return arr.reshape(orig_shape)
+        for idx, col in enumerate(self.feature_names):
+            encoded_series = data_2d.iloc[:, idx]  # 위치 기반 접근
+            if col in self.numeric_only_features:
+                # 숫자형 그대로 복원
+                replacement = self.nan_replacements[col]
+                decoded_series = encoded_series.replace(replacement, np.nan)
+                inversed[col] = decoded_series
             else:
-                return arr.reshape(orig_shape)
+                le = self.encoder[col]
+                missing_idx = self.missing_category_index[col]
+                original_dtype = self.original_dtypes[col]
+
+                is_missing = (encoded_series == missing_idx)
+
+                if np.issubdtype(original_dtype, np.integer) or np.issubdtype(original_dtype, np.floating):
+                    decoded_series = encoded_series.copy()
+                    decoded_series[is_missing] = np.nan
+                else:
+                    non_missing_encoded = encoded_series[~is_missing].astype(int)
+                    decoded_non_missing = le.inverse_transform(non_missing_encoded)
+                    decoded_series = pd.Series(index=encoded_series.index, dtype=object)
+                    decoded_series[~is_missing] = decoded_non_missing
+
+                if pd.api.types.is_numeric_dtype(original_dtype) and not pd.api.types.is_float_dtype(original_dtype):
+                    if decoded_series.notna().all():
+                        decoded_series = decoded_series.astype(original_dtype)
+
+                inversed[col] = decoded_series
+
+        if input_kind in ("ndarray", "series"):
+            arr = inversed.to_numpy()
+            return arr.reshape(orig_shape)
         else:
-            # DataFrame으로 fit/transform 했으면 DataFrame 반환
-            # 컬럼명도 feature_names 기준으로 맞춰줌
             inversed.columns = self.feature_names
             return inversed
 
-    # -----------------------
-    # 그 외 유틸
-    # -----------------------
     def get_feature_names_out(self):
-        """
-        - 마지막 축 기준 feature 이름 반환
-        - DataFrame / 2D ndarray / ND ndarray 모두에서 동일하게 동작
-        """
         if not self._fitted:
             raise RuntimeError("DS_LabelEncoder is not fitted yet.")
-
         return np.array(self.feature_names, dtype=object) if self.feature_names is not None else None
-
+    
     def fit_transform(self, X):
         return self.fit(X).transform(X)
 
@@ -426,6 +408,7 @@ class DS_LabelEncoder:
             repr_str += str(list(self.encoder.keys()))
         repr_str += ")"
         return repr_str
+
 
 # class DS_LabelEncoder:
 #     def __init__(self, nan_value=-1, unseen_as_nan=False):
