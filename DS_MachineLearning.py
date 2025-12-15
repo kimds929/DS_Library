@@ -4399,6 +4399,141 @@ class ModelEvaluate():
 
 
 
+# mpe = ModelPerformanceEvaluation(data_preprocessor=data_prepros, target_task='regression',
+#                                 ml_bayes_opt=False,
+#                                 ml_models=['RandomForest', 'GradientBoosting', 'XGB', 'LGBM', 'CatBoost'],
+#                                 dl_models=[tm],
+#                                 verbose=2)
+# # mpe = ModelPerformanceEvaluation(data_preprocessor=data_prepros, target_task='classification',
+# #                                  ml_bayes_opt=False,
+# #                                  ml_models=['RandomForest', 'GradientBoosting', 'XGB', 'LGBM', 'CatBoost'],
+# #                                  dl_models=[tm],
+# #                                  verbose=2)
+# mpe.make_ml_dataset()
+# mpe.run_ml_learning()
+# mpe.make_dl_dataset()
+# # mpe.dl_dataset
+# mpe.run_dl_learning()
+# pd.DataFrame(mpe.results).T
+
+# # mpe.make_dl_dataset()
+# # mpe.dl_dataset
+
+# def my_callback(res):
+#     print(res.models)
+#     # print(np.array(dir(res.models)))
+# model_name = 'GradientBoosting'
+# bayes_opt_logger = BayesOptLogger(1)
+# base_model = GradientBoostingRegressor(verbose=0)
+# ml_bayes_opt = BayesSearchCV(estimator=base_model,
+#               search_spaces=mpe.ml_optimize_params_range[model_name],
+#               cv=mpe.ml_dataset['pre_finded_split'],
+#               n_iter=10, n_points=1, verbose=0, scoring='neg_mean_squared_error',
+#               )
+# ml_bayes_opt.fit(*mpe.ml_dataset['train_valid'], callback = my_callback)
+
+# # ml_bayes_opt.fit(pd.DataFrame(mpe.ml_dataset['train_valid'][0]), pd.DataFrame(mpe.ml_dataset['train_valid'][1]), callback=bayes_opt_logger )
+# mpe.ml_dataset['test']
+# optim.AdamW
+# print("Best Score:", ml_bayes_opt.best_score_)
+# print("Best Params:", ml_bayes_opt.best_params_)
+# print("Best Params:", ml_bayes_opt.best_estimator_)
+
+
+
+
+
+# space.Categorical
+# param_space = {
+#     'criterion': space.Categorical(['gini', 'entropy']),
+#     'bootstrap': space.Categorical([True, False]),
+# }
+
+
+# [scoring] Maximize Direction
+#   (regression) default : r2_score
+#       'neg_mean_squared_error' : MSE (작을수록 좋음, 부호를 바꿔서 최대화)
+#       'neg_root_mean_squared_error' : RMSE
+#       'neg_mean_squared_log_error' : MSLE
+#       'neg_mean_absolute_error' : MAE
+#       'neg_median_absolute_error' : Median AE
+#       'r2' : R² score (1에 가까울수록 좋음)
+#   (classification) default : accuracy_score
+#       'accuracy' : 정확도 (정답 비율)
+#       'balanced_accuracy' : 클래스 불균형을 고려한 정확도
+#       'precision' : 정밀도 (Positive 예측 중 실제 Positive 비율)
+#       'recall' : 재현율 (실제 Positive 중 예측 Positive 비율)
+#       'f1' : F1-score (정밀도와 재현율의 조화 평균)
+#       'roc_auc' : ROC 곡선 아래 면적 (이진 분류)
+#       'roc_auc_ovr' : One-vs-Rest 방식 AUC (다중 클래스)
+#       'roc_auc_ovo' : One-vs-One 방식 AUC (다중 클래스)
+#       'neg_log_loss' : 로그 손실, CrossEntropyLoss (값이 작을수록 좋음, 부호를 바꿔서 최대화)
+#       <macro> : sample수와 관계없이 모든 class를 동일한 가중치로 평가 (class imbalance 해결 가능)
+#           'precision_macro', 'precision_micro', 'precision_weighted'
+#           'recall_macro', 'recall_micro', 'recall_weighted'
+#           'f1_macro', 'f1_micro', 'f1_weighted'
+
+
+
+
+
+
+# # RandomForest
+# rf_params = {
+#     'n_estimators': (50, 500),          # int
+#     'max_depth': (3, 30),               # int
+#     'min_samples_split': (2, 20),       # int
+#     'min_samples_leaf': (1, 10),        # int
+#     'max_features': (0.1, 1.0)          # float
+# }
+
+# # GradientBoosting (sklearn)
+# gb_params = {
+#     'n_estimators': (50, 500),          # int
+#     'learning_rate': (0.01, 0.3),       # float
+#     'max_depth': (3, 15),               # int
+#     'min_samples_split': (2, 20),       # int
+#     'min_samples_leaf': (1, 10),        # int
+#     'subsample': (0.5, 1.0)              # float
+# }
+
+# # XGBoost
+# xgb_params = {
+#     'n_estimators': (50, 1000),         # int
+#     'max_depth': (3, 15),               # int
+#     'learning_rate': (0.01, 0.3),       # float
+#     'min_child_weight': (1, 10),        # float
+#     'subsample': (0.5, 1.0),            # float
+#     'colsample_bytree': (0.5, 1.0),     # float
+#     'gamma': (0.0, 5.0),                # float
+#     'reg_alpha': (0.0, 1.0),            # float
+#     'reg_lambda': (0.0, 1.0)            # float
+# }
+
+# # LightGBM
+# lgb_params = {
+#     'num_leaves': (20, 200),            # int
+#     'max_depth': (-1, 15),              # int (-1은 제한 없음)
+#     'learning_rate': (0.01, 0.3),       # float
+#     'n_estimators': (50, 1000),         # int
+#     'min_child_samples': (5, 50),       # int
+#     'subsample': (0.5, 1.0),            # float
+#     'colsample_bytree': (0.5, 1.0),     # float
+#     'reg_alpha': (0.0, 1.0),            # float
+#     'reg_lambda': (0.0, 1.0)            # float
+# }
+
+# # CatBoost
+# cat_params = {
+#     'iterations': (50, 1000),          # n_estimators와 동일
+#     'depth': (3, 15),                  # max_depth와 동일
+#     'learning_rate': (0.01, 0.3),
+#     'l2_leaf_reg': (1.0, 10.0),        # L2 규제 강도
+#     'rsm': (0.5, 1.0),                  # colsample_bytree에 해당
+#     'bagging_temperature': (0.0, 5.0), # subsample 대체
+#     'border_count': (32, 255)          # 연속형 변수 분할 수
+# }
+
 
 
 
