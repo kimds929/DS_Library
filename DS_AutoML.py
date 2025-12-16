@@ -80,7 +80,7 @@ class ModelPerformanceEvaluation():
                 ,dl_bayes_opt = False
                 ,ml_models=['RandomForest']
                 ,dl_models=[]
-                ,ml_kwargs = {'n_iter':2}
+                ,ml_kwargs = {'n_iter':30}
                 ,dl_kwargs = {'epochs':300}
                 ,verbose = 0
                 ,random_state=None
