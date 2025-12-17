@@ -11,23 +11,24 @@ class OracleDB():
         self.sql_path = 'D:/작업방/업무 - 자동차 ★★★/쿼리 MES 3.0/'
         self.dataset_path = 'D:/작업방/업무 - 자동차 ★★★/Dataset/'
     """
-    def __init__(self):
+    def __init__(self, username, password, DB='PKNMAS'):
         try:
-            cx_Oracle.init_oracle_client(lib_dir=r"D:\OracleSQL\instantclient_21_10")
+            cx_Oracle.init_oracle_client(lib_dir=r"D:\instantclient_23_9")
         except:
             pass
         
         LOCATION = r"C:\Oracle\BIN"
         os.environ["PATH"] = LOCATION + ";" + os.environ["PATH"]
         
-        self.userName = 'PC576954P'
-        password_list = [112, 111, 115, 99, 111, 49, 49, 35]
-        self.password = ''.join([chr(i) for i in password_list])
+        self.userName = username
+        self.password = password
+        self.result_status = 'idle'
+        self.result = None
 
         self.server_dict = {'PKNMAS' : ('172.28.109.21', 2121), 'PKMNS': ('172.28.72.65', 1570)}
         
-        self.sql_path = 'D:/작업방/업무 - 자동차 ★★★/쿼리 MES 3.0/'
-        self.dataset_path = 'D:/작업방/업무 - 자동차 ★★★/Dataset/'
+        # self.sql_path = 'D:/작업방/업무 - 자동차 ★★★/쿼리 MES 3.0/'
+        # self.dataset_path = 'D:/작업방/업무 - 자동차 ★★★/Dataset/'
         
     def connect(self, DB='PKNMAS'):
         # dsn = cx_Oracle.makedsn("172.28.109.21", 2121, service_name="PKNMAS")
@@ -45,20 +46,65 @@ class OracleDB():
         
         sql_all = sql + '\n' +add_script
         
+        
         with self.conn.cursor() as cs:
-            cs.execute(sql_all, variables)     # 쿼리 실행
-            Column_Names = [cn[0] for cn in cs.description]
+            try:
+                cs.execute(sql_all, [])     # 쿼리 실행
+                
+                # description
+                descriptions = cs.description
+                desc_cols = ('name', 'type_code', 'display_size', 'internal_size', 'precision', 'scale', 'null_ok')
+                
+                descriptioins_df = pd.DataFrame(descriptions, columns=desc_cols)
+                valid_cols = descriptioins_df['type_code'].apply(lambda x: False if 'DbType DB_TYPE_BLOB' in str(x) else True)
+                not_valid_columns = ",".join(descriptioins_df[~valid_cols].iloc[:,0])
+                valid_column_names = descriptioins_df[valid_cols].iloc[:,0].to_list()
+                    
+                try:
+                    # fetch
+                    df_fetch = cs.fetchall()       # 한번에 뽑기
+                    
+                    result_status = 'completed'
 
-            df_fetch = cs.fetchall()       # 한번에 뽑기
+                except:
+                    # validation
+                    table_id = [c.lower().split('from ')[1] for c in sql_all.split('\n') if 'from' in c.lower()][0]
+                    where_sql = [c.lower().split('where ')[1] for c in sql_all.split('\n') if 'where' in c.lower()][0]
+                    
+                    sql_all = "SELECT " + ", ".join(valid_column_names)
+                    sql_all += f"\nFROM {table_id}"
+                    sql_all += f"\nWHERE {where_sql}"
+                    
+                    # query re-execute
+                    cs.execute(sql_all, [])     # 쿼리 실행
+
+                    # fetch
+                    df_fetch = cs.fetchall()       # 한번에 뽑기
+                    
+                    result_status = 'completed'
+
+            except cx_Oracle.DatabaseError as error:
+                # print(error.args)
+                # print(dir(error))
+                result_status = 'error'
+                result = error.args[0]
             
-            result = pd.DataFrame(df_fetch , columns=Column_Names)
-            if verbose > 0:
-                print(f"* Complete Load Query: {result.shape}")
+            if result_status == 'completed':
+                result = pd.DataFrame(df_fetch , columns=valid_column_names)
+                
+                if verbose > 0:
+                    print(f"* Complete Load Query: {result.shape}")
+                
             
             if file_path is not None:
                 file.close()
         self.result = result
+        self.result_status = result_status
+        return result_status, result
 
+    def get_result(self):
+        return self.result
+    
     def disconnect(self):
         self.conn.close()
 
