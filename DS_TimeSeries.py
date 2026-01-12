@@ -649,42 +649,75 @@ def series_smoothing(x, mask, window=3, min_periods=1, center=True, agg='mean', 
 
 
 
-# 서로 다른 길이의 1D 시계열을 최대 길이에 맞춰 padding.
-def pad_series_list_1d(series_list, pad_value=np.nan):
+# 서로 다른 길이의 시계열을 최대 길이에 맞춰 padding.
+def pad_series_list(series_list, max_len=None, pad_value=np.nan):
     """
-    서로 다른 길이의 시계열을 최대 길이에 맞춰 zero padding.
-    Args:
-        series_list (list[np.ndarray]): 각 시계열 (길이 다름)
-        pad_value (float): 패딩값 (기본 0)
-    Returns:
-        np.ndarray: shape = (N, max_len)
-    """
-    max_len = max(len(s) for s in series_list)
-    padded = np.full((len(series_list), max_len), pad_value, dtype=float)
-    for i, s in enumerate(series_list):
-        padded[i, :len(s)] = s
-    return padded
+    1D 또는 2D 시계열 리스트를 자동으로 판별하여 padding / truncation 수행.
 
-# 서로 다른 길이의 2D 시계열을 최대 길이에 맞춰 padding.
-def pad_series_list_2d(series_list, pad_value=np.nan):
-    """
-    서로 다른 길이의 2D 시계열을 최대 길이에 맞춰 padding.
     Args:
-        series_list (list[np.ndarray]): 각 시계열 (shape: features × time_length)
+        series_list (list[np.ndarray]):
+            - 1D: (N, time,)
+            - 2D: (N, features, time)
+        max_len (int or None):
+            - None이면 입력 시계열 중 최대 time 길이 사용
+            - int이면 해당 길이에 맞게 자르거나 padding
         pad_value (float): 패딩값
+
     Returns:
-        np.ndarray: shape = (N, features, max_len)
+        np.ndarray:
+            - 1D 입력 → (N, max_len)
+            - 2D 입력 → (N, features, max_len)
     """
-    # features 수는 동일하다고 가정
-    features = series_list[0].shape[0]
-    max_len = max(s.shape[1] for s in series_list)
-    
-    padded = np.full((len(series_list), features, max_len), pad_value, dtype=float)
-    for i, s in enumerate(series_list):
-        padded[i, :, :s.shape[1]] = s
-    return padded
+    if not series_list:
+        raise ValueError("series_list is empty.")
 
+    sample = series_list[0]
+    ndim = np.array(sample).ndim
 
+    # -------------------
+    # 1D 시계열
+    # -------------------
+    if ndim == 1:
+        if max_len is None:
+            max_len = max(len(s) for s in series_list)
+
+        padded = np.full((len(series_list), max_len), pad_value, dtype=float)
+
+        for i, s in enumerate(series_list):
+            length = min(len(s), max_len)
+            padded[i, :length] = s[:length]
+
+        return padded
+
+    # -------------------
+    # 2D 시계열 (features × time)
+    # -------------------
+    elif ndim == 2:
+        features = sample.shape[0]
+
+        if max_len is None:
+            max_len = max(s.shape[1] for s in series_list)
+
+        padded = np.full(
+            (len(series_list), features, max_len),
+            pad_value,
+            dtype=float
+        )
+
+        for i, s in enumerate(series_list):
+            length = min(s.shape[1], max_len)
+            padded[i, :, :length] = s[:, :length]
+
+        return padded
+
+    # -------------------
+    # 그 외 차원은 명시적으로 차단
+    # -------------------
+    else:
+        raise ValueError(
+            f"Unsupported series dimension: {ndim}. "
+            "Only 1D or 2D arrays are supported."
+        )
 
 
 
