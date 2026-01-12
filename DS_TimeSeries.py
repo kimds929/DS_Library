@@ -652,12 +652,13 @@ def series_smoothing(x, mask, window=3, min_periods=1, center=True, agg='mean', 
 # 서로 다른 길이의 시계열을 최대 길이에 맞춰 padding.
 def pad_series_list(series_list, max_len=None, pad_value=np.nan):
     """
-    1D 또는 2D 시계열 리스트를 자동으로 판별하여 padding / truncation 수행.
+    1D 또는 2D(time-major) 시계열 리스트를 자동 판별하여
+    padding / truncation 수행.
 
     Args:
         series_list (list[np.ndarray]):
-            - 1D: (N, time,)
-            - 2D: (N, features, time)
+            - 1D: (time,)
+            - 2D: (time, features)
         max_len (int or None):
             - None이면 입력 시계열 중 최대 time 길이 사용
             - int이면 해당 길이에 맞게 자르거나 padding
@@ -666,13 +667,13 @@ def pad_series_list(series_list, max_len=None, pad_value=np.nan):
     Returns:
         np.ndarray:
             - 1D 입력 → (N, max_len)
-            - 2D 입력 → (N, features, max_len)
+            - 2D 입력 → (N, max_len, features)
     """
     if not series_list:
         raise ValueError("series_list is empty.")
 
     sample = series_list[0]
-    ndim = np.array(sample).ndim
+    ndim = sample.ndim
 
     # -------------------
     # 1D 시계열
@@ -690,23 +691,23 @@ def pad_series_list(series_list, max_len=None, pad_value=np.nan):
         return padded
 
     # -------------------
-    # 2D 시계열 (features × time)
+    # 2D 시계열 (time × features)
     # -------------------
     elif ndim == 2:
-        features = sample.shape[0]
+        features = sample.shape[1]
 
         if max_len is None:
-            max_len = max(s.shape[1] for s in series_list)
+            max_len = max(s.shape[0] for s in series_list)
 
         padded = np.full(
-            (len(series_list), features, max_len),
+            (len(series_list), max_len, features),
             pad_value,
             dtype=float
         )
 
         for i, s in enumerate(series_list):
-            length = min(s.shape[1], max_len)
-            padded[i, :, :length] = s[:, :length]
+            length = min(s.shape[0], max_len)
+            padded[i, :length, :] = s[:length, :]
 
         return padded
 
