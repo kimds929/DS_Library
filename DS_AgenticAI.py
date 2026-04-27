@@ -212,15 +212,23 @@ class PgptLLM(BaseChatModel):
             for m in messages
         ]
         
-        # 스트리밍 여부와 상관없이 동일한 페이로드 전송 (stream 파라미터 제거)
+        # 🌟 기본 페이로드 (모든 모델 공통)
         payload = {
             "model": self.model_name,
             "messages": formatted_messages,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "frequency_penalty": self.frequency_penalty,
             "need_origin": self.need_origin
         }
+
+        # 🌟 모델 이름에 'nano', 'mini'가 들어가거나 'chat'이 없는 경우 추론 모델로 간주
+        # (클래스 주석의 모델 리스트 규칙을 참고하여 조건문 작성)
+        is_reasoning_model = any(keyword in self.model_name.lower() for keyword in ["nano", "mini", "o1", "r1"])
+        
+        # 추론 모델이 아닐 때만(일반 채팅 모델일 때만) 파라미터 추가
+        if not is_reasoning_model:
+            payload["temperature"] = self.temperature
+            payload["top_p"] = self.top_p
+            payload["frequency_penalty"] = self.frequency_penalty
+
         return headers, payload
 
     # ==========================================
@@ -464,7 +472,6 @@ class PgptEmbeddings(Embeddings):
     def embed_query(self, text: str) -> List[float]:
         """사용자의 질문 하나를 벡터로 변환 (검색용)"""
         return self.embed_documents([text])[0]
-
 
 
 
