@@ -120,6 +120,8 @@ class StreamResponse:
                 "metadata": final_metadata
             }
 
+    def __str__(self) -> str:
+        return self.content
 # --------------------------------------------------------------------------------------------------------------
 
 
@@ -191,7 +193,18 @@ class PgptLLM(BaseChatModel):
     top_p: float = 0.9
     frequency_penalty: float = 0.0
     need_origin: bool = True
+    timeout: int = 240
 
+    def _is_reasoning_model(self) -> bool:
+        name = self.model_name.lower()
+        if name in ["gpt-5.2", "gpt-5.1-codex", "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-4o-mini"]:
+            return True
+        if "chat" in name:
+            return False
+        if any(keyword in name for keyword in ["mini", "nano", "o1", "r1", "codex"]):
+            return True
+        return False
+    
     def _prepare_request(self, messages: List[BaseMessage]):
         """API 요청을 위한 헤더와 페이로드를 준비하는 공통 함수"""
         auth_data = {
@@ -219,12 +232,8 @@ class PgptLLM(BaseChatModel):
             "need_origin": self.need_origin
         }
 
-        # 🌟 모델 이름에 'nano', 'mini'가 들어가거나 'chat'이 없는 경우 추론 모델로 간주
-        # (클래스 주석의 모델 리스트 규칙을 참고하여 조건문 작성)
-        is_reasoning_model = any(keyword in self.model_name.lower() for keyword in ["nano", "mini", "o1", "r1"])
-        
         # 추론 모델이 아닐 때만(일반 채팅 모델일 때만) 파라미터 추가
-        if not is_reasoning_model:
+        if not self._is_reasoning_model():
             payload["temperature"] = self.temperature
             payload["top_p"] = self.top_p
             payload["frequency_penalty"] = self.frequency_penalty
@@ -239,7 +248,7 @@ class PgptLLM(BaseChatModel):
     ) -> ChatResult:
         headers, payload = self._prepare_request(messages)
         
-        response = requests.post(self.base_url, headers=headers, json=payload)
+        response = requests.post(self.base_url, headers=headers, json=payload, timeout=self.timeout)
         
         if response.status_code != 200:
             raise Exception(f"API Error {response.status_code}: {response.text}")
@@ -253,49 +262,13 @@ class PgptLLM(BaseChatModel):
         
         message = AIMessage(content=answer_text)
         return ChatResult(generations=[ChatGeneration(message=message)])
-
-    # ==========================================
-    # 2. 스트리밍 출력용 메서드 (llm.stream)
-    # ==========================================
-    # def _stream(
-    #     self, messages: List[BaseMessage], stop: Optional[List[str]] = None, **kwargs: Any
-    # ) -> Iterator[ChatGenerationChunk]:
-    #     headers, payload = self._prepare_request(messages)
-        
-    #     # 🌟 stream_url 사용 : stream=True 
-    #     response = requests.post(self.stream_url, headers=headers, json=payload, stream=True)
-        
-    #     if response.status_code != 200:
-    #         raise Exception(f"Stream API Error {response.status_code}: {response.text}")
-
-    #     # 🌟 사내 API 파싱 로직
-    #     for line in response.iter_lines():
-    #         if line:
-    #             line_text = line.decode('utf-8')
-                
-    #             if line_text.startswith('data:'):
-    #                 data_str = line_text.removeprefix('data:').strip()
-                    
-    #                 # 스트리밍 종료 신호 처리 (안전장치)
-    #                 if data_str == "[DONE]":
-    #                     break
-                        
-    #                 try:
-    #                     data_json = json.loads(data_str)
-    #                     # 사내 API 규격인 'response' 키에서 텍스트 추출
-    #                     if 'response' in data_json:
-    #                         chunk_content = data_json['response']
-    #                         chunk = AIMessageChunk(content=chunk_content)
-    #                         yield ChatGenerationChunk(message=chunk)
-    #                 except json.JSONDecodeError:
-    #                     continue
     
     def _stream(
         self, messages: List[BaseMessage], stop: Optional[List[str]] = None, **kwargs: Any
     ) -> Iterator[ChatGenerationChunk]:
         headers, payload = self._prepare_request(messages)
         
-        response = requests.post(self.stream_url, headers=headers, json=payload, stream=True)
+        response = requests.post(self.stream_url, headers=headers, json=payload, stream=True, timeout=self.timeout)
         
         if response.status_code != 200:
             raise Exception(f"Stream API Error {response.status_code}: {response.text}")
