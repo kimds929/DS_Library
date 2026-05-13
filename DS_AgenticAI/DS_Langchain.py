@@ -4,6 +4,8 @@ import base64
 import json
 import time
 import aiohttp
+import html
+import re
 
 from typing import Any, Dict, List, Optional, Iterator, Iterable, Union, Type, Callable
 from tqdm.auto import tqdm
@@ -14,6 +16,7 @@ from rich.markdown import Markdown
 from rich.live import Live
 from rich.theme import Theme
 
+
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatResult, ChatGeneration, ChatGenerationChunk
@@ -23,334 +26,19 @@ from langchain_core.runnables import Runnable
 from langchain_core.prompt_values import PromptValue 
 from langchain_core.output_parsers import PydanticOutputParser
 
+from dataclasses import dataclass
+from IPython.display import display, HTML, update_display
 
+from markdown_it import MarkdownIt
+from markdown_it.rules_block import StateBlock
+from mdit_py_plugins.front_matter import front_matter_plugin  
 
-# --------------------------------------------------------------------------------------------------------------
-def read_messages(path):
-    with open(path, 'r', encoding='utf-8-sig') as f:
-        return f.read()
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.formatters import HtmlFormatter
+from pygments.util import ClassNotFound
 
 
-
-
-# def print_md(texts, inline_code_theme="bold #FF7F50 on #E8E8E8" , code_theme='frendly'):
-#     # (For black Themes)
-#     # 'monokai'         : 가장 대중적임. 어두운 배경에 형광색 포인트. 기본값, 가장 무난하고 가독성이 좋음.
-#     # 'native'          :고전적인 터미널 코드 색상.	심플하고 군더더기 없는 스타일.
-#     # 'dracula'         : 보라색/분홍색 계열의 세련된 어두운 테마.	눈이 편안하며 현대적인 느낌.
-#     # 'solarized-dark'  : 눈의 피로를 최소화한 부드러운 색감.	장시간 터미널을 보는 개발자에게 최적.
-#     # 'github-dark'	    : GitHub의 다크 모드와 유사한 깔끔한 색상.	코드 리뷰나 문서 확인 시 익숙함.
-#     #
-#     # (For white Themes)
-#     # friendly	        : 밝은 배경에 최적화된 가장 표준적인 테마.	가독성이 가장 좋고 깔끔함.
-#     # colorful	        : 색상이 뚜렷하고 대비가 강함.	코드의 구조를 한눈에 파악하기 좋음.
-#     # bw	            : 흑백(Black & White) 테마.	색상 없이 굵기나 기울임으로만 강조하여 매우 정갈함.
-#     # pastie	        : 파스텔 톤의 부드러운 색감.	눈이 편안하며 문서 출력물 같은 느낌.
-#     # tango	            : 명확한 색상 대비를 가진 고전적인 테마.	가독성과 심미성을 동시에 잡음.
-#     custom_theme = Theme({
-#         "markdown.code": inline_code_theme,  # 인라인 코드 스타일 제거
-#     })
-#     Console(theme=custom_theme).print(Markdown(texts, code_theme=code_theme))
-
-
-
-class MarkdownPrint:
-    """
-    Markdown 출력과 스트리밍 출력(Live rendering)을 동시에 지원하는 유틸리티 클래스.
-
-    주요 기능:
-    - 일반 print처럼 Markdown 출력 가능
-    - LLM streaming 출력 지원
-    - 성능 최적화를 위한 update interval 제어
-    - Markdown 코드블록 깨짐 방지 (render 시 임시 보정)
-    - with 문을 통한 자동 close 처리
-
-    사용 예시:
-
-    [일반 출력]
-        MarkdownPrint("## Hello World")
-
-    [스트리밍 출력]
-        with MarkdownPrint(stream=True, end="", flush=False) as md_print:
-            for token in response:
-                md_print(token.content)
-    """
-
-    def __init__(
-        self,
-        text: str = "",
-        *,
-        inline_code_theme: str = "bold #FF7F50 on #E8E8E8",
-        code_theme: str = "friendly",
-        stream: bool = False,
-        refresh_per_second: int = 12,
-
-        update_every_chars: int = 30,
-        update_every_tokens: int = 1,
-        update_every_seconds: float = 0.05,
-
-        stabilize_code_block: bool = True,
-
-        end: str = "\n",
-        flush: bool = False,
-    ):
-        """
-        MarkdownPrint 객체를 초기화합니다.
-
-        Args:
-            text (str):
-                초기 출력할 텍스트. (옵션)
-
-            inline_code_theme (str):
-                인라인 코드 스타일 설정 (rich theme 형식)
-
-            code_theme (str):
-                Markdown 코드 블록 테마 (friendly, monokai 등)
-                    (For dark Themes)
-                    . 'monokai'         : 가장 대중적임. 어두운 배경에 형광색 포인트. 기본값, 가장 무난하고 가독성이 좋음.
-                    . 'native'          :고전적인 터미널 코드 색상.	심플하고 군더더기 없는 스타일.
-                    . 'dracula'         : 보라색/분홍색 계열의 세련된 어두운 테마.	눈이 편안하며 현대적인 느낌.
-                    . 'solarized-dark'  : 눈의 피로를 최소화한 부드러운 색감.	장시간 터미널을 보는 개발자에게 최적.
-                    . 'github-dark'	    : GitHub의 다크 모드와 유사한 깔끔한 색상.	코드 리뷰나 문서 확인 시 익숙함.
-                     
-                    (For light Themes)
-                    . 'friendly'	        : 밝은 배경에 최적화된 가장 표준적인 테마.	가독성이 가장 좋고 깔끔함.
-                    . 'colorful'	        : 색상이 뚜렷하고 대비가 강함.	코드의 구조를 한눈에 파악하기 좋음.
-                    . 'bw'	            : 흑백(Black & White) 테마.	색상 없이 굵기나 기울임으로만 강조하여 매우 정갈함.
-                    . 'pastie'	        : 파스텔 톤의 부드러운 색감.	눈이 편안하며 문서 출력물 같은 느낌.
-                    . 'tango'	            : 명확한 색상 대비를 가진 고전적인 테마.	가독성과 심미성을 동시에 잡음.
-
-            stream (bool):
-                True일 경우 Live streaming 모드로 동작
-                False일 경우 일반 print처럼 동작
-
-            refresh_per_second (int):
-                Live 렌더링 프레임 갱신 속도
-                값이 높을수록 부드럽지만 CPU 사용 증가
-
-            update_every_chars (int):
-                누적 문자 수 기준으로 렌더링 업데이트 수행
-
-            update_every_tokens (int):
-                토큰 개수 기준으로 렌더링 업데이트 수행
-
-            update_every_seconds (float):
-                마지막 업데이트 이후 경과 시간 기준 업데이트 수행
-
-            stabilize_code_block (bool):
-                코드블록(```)이 닫히지 않은 상태에서
-                렌더링 시 임시로 닫아 Markdown 깨짐을 방지
-
-            end (str):
-                print의 end와 동일
-
-            flush (bool):
-                즉시 렌더링 여부
-        """
-
-        self.inline_code_theme = inline_code_theme
-        self.code_theme = code_theme
-        self.stream = stream
-        self.refresh_per_second = refresh_per_second
-
-        self.update_every_chars = update_every_chars
-        self.update_every_tokens = update_every_tokens
-        self.update_every_seconds = update_every_seconds
-
-        self.stabilize_code_block = stabilize_code_block
-
-        self.end = end
-        self.flush = flush
-
-        self.content = ""
-        self._buffer_chars = 0
-        self._buffer_tokens = 0
-        self._last_update_time = time.time()
-
-        custom_theme = Theme({
-            "markdown.code": inline_code_theme,
-        })
-
-        self.console = Console(theme=custom_theme)
-        self.live: Optional[Live] = None
-
-        if self.stream:
-            self.live = Live(
-                "",
-                console=self.console,
-                refresh_per_second=self.refresh_per_second,
-                transient=False,
-            )
-            self.live.start()
-
-        if text:
-            self.print(text, end=end, flush=flush)
-
-    def _is_code_block_open(self, text: str) -> bool:
-        """
-        현재 텍스트에서 코드블록이 열려있는지 판단합니다.
-
-        Returns:
-            bool:
-                True → 코드블록이 아직 닫히지 않은 상태
-        """
-        return text.count("```") % 2 == 1
-
-    def _renderable_content(self) -> str:
-        """
-        실제 content를 변경하지 않고,
-        렌더링 시 Markdown 안정성을 위한 보정 수행
-
-        Returns:
-            str:
-                렌더링용 안전한 Markdown 문자열
-        """
-        if not self.stabilize_code_block:
-            return self.content
-
-        if self._is_code_block_open(self.content):
-            return self.content + "\n```"
-
-        return self.content
-
-    def _should_update(self, force: bool = False) -> bool:
-        """
-        렌더링 업데이트를 수행해야 하는지 판단
-
-        조건:
-        - 문자 수
-        - 토큰 수
-        - 시간
-
-        Returns:
-            bool:
-                업데이트 필요 여부
-        """
-        if force:
-            return True
-
-        now = time.time()
-
-        if self.update_every_chars and self._buffer_chars >= self.update_every_chars:
-            return True
-
-        if self.update_every_tokens and self._buffer_tokens >= self.update_every_tokens:
-            return True
-
-        if self.update_every_seconds and (now - self._last_update_time) >= self.update_every_seconds:
-            return True
-
-        return False
-
-    def _reset_update_counter(self):
-        """
-        업데이트 후 카운터 초기화
-        """
-        self._buffer_chars = 0
-        self._buffer_tokens = 0
-        self._last_update_time = time.time()
-
-    def _update_live(self, force: bool = False):
-        """
-        Live rendering 수행
-
-        Args:
-            force (bool):
-                강제 렌더링 여부
-        """
-        if not self.live:
-            return
-
-        if not self._should_update(force):
-            return
-
-        md = Markdown(
-            self._renderable_content(),
-            code_theme=self.code_theme,
-        )
-
-        self.live.update(md, refresh=True)
-        self._reset_update_counter()
-
-    def print(
-        self,
-        text: str,
-        *,
-        end: Optional[str] = None,
-        flush: Optional[bool] = None,
-    ):
-        """
-        print()와 동일한 인터페이스로 Markdown 출력 수행
-
-        Args:
-            text (str):
-                출력할 문자열
-
-            end (str):
-                문자열 끝에 추가될 값
-
-            flush (bool):
-                즉시 렌더링 여부
-        """
-        if end is None:
-            end = self.end
-
-        if flush is None:
-            flush = self.flush
-
-        text = str(text)
-
-        if self.stream:
-            self.content += text
-            self._buffer_chars += len(text)
-            self._buffer_tokens += 1
-
-            self._update_live(force=flush)
-
-        else:
-            md = Markdown(text + end, code_theme=self.code_theme)
-            self.console.print(md, end="")
-
-    def write(self, text: str, **kwargs):
-        """
-        print() alias (file-like interface 호환)
-        """
-        self.print(text, **kwargs)
-
-    def flush_now(self):
-        """
-        즉시 강제 렌더링 수행
-        """
-        if self.stream:
-            self._update_live(force=True)
-
-    def close(self):
-        """
-        스트리밍 종료 및 최종 렌더링 수행
-        """
-        if self.live:
-            md = Markdown(self.content, code_theme=self.code_theme)
-            self.live.update(md, refresh=True)
-            self.live.stop()
-            self.live = None
-
-    def __call__(self, text: str, **kwargs):
-        """
-        객체를 함수처럼 호출 가능하도록 지원
-        """
-        self.print(text, **kwargs)
-
-    def __enter__(self):
-        """
-        with 문 진입 시 객체 반환
-        """
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """
-        with 문 종료 시 자동 close 수행
-        """
-        self.close()
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -384,14 +72,413 @@ def langsmith(project_name=None, set_enable=True):
         print("LangSmith 추적을 하지 않습니다.")
 
 
+# --------------------------------------------------------------------------------------------------------------
+
 def env_variable(key, value):
     os.environ[key] = value
-
-
+# --------------------------------------------------------------------------------------------------------------
 
 
 
 # --------------------------------------------------------------------------------------------------------------
+def read_messages(path):
+    with open(path, 'r', encoding='utf-8-sig') as f:
+        return f.read()
+
+
+
+
+# def print_md(texts, inline_code_theme="bold #FF7F50 on #E8E8E8" , code_theme='frendly'):
+#     # (For black Themes)
+#     # 'monokai'         : 가장 대중적임. 어두운 배경에 형광색 포인트. 기본값, 가장 무난하고 가독성이 좋음.
+#     # 'native'          :고전적인 터미널 코드 색상.	심플하고 군더더기 없는 스타일.
+#     # 'dracula'         : 보라색/분홍색 계열의 세련된 어두운 테마.	눈이 편안하며 현대적인 느낌.
+#     # 'solarized-dark'  : 눈의 피로를 최소화한 부드러운 색감.	장시간 터미널을 보는 개발자에게 최적.
+#     # 'github-dark'	    : GitHub의 다크 모드와 유사한 깔끔한 색상.	코드 리뷰나 문서 확인 시 익숙함.
+#     #
+#     # (For white Themes)
+#     # friendly	        : 밝은 배경에 최적화된 가장 표준적인 테마.	가독성이 가장 좋고 깔끔함.
+#     # colorful	        : 색상이 뚜렷하고 대비가 강함.	코드의 구조를 한눈에 파악하기 좋음.
+#     # bw	            : 흑백(Black & White) 테마.	색상 없이 굵기나 기울임으로만 강조하여 매우 정갈함.
+#     # pastie	        : 파스텔 톤의 부드러운 색감.	눈이 편안하며 문서 출력물 같은 느낌.
+#     # tango	            : 명확한 색상 대비를 가진 고전적인 테마.	가독성과 심미성을 동시에 잡음.
+#     custom_theme = Theme({
+#         "markdown.code": inline_code_theme,  # 인라인 코드 스타일 제거
+#     })
+#     Console(theme=custom_theme).print(Markdown(texts, code_theme=code_theme))
+
+##############################################################################################################
+
+@dataclass
+class _Fence:
+    lang: str
+    code: str
+
+
+class MarkdownPrint:
+    """
+    Markdown 출력과 스트리밍 출력(Live rendering)을 동시에 지원하는 유틸리티 클래스.
+    + html_output=True 일 때: VSCode Jupyter Interactive에서 HTML로 실시간 렌더링 지원
+    """
+
+    _LANG_RE = re.compile(r"^[A-Za-z0-9_+-]+$")
+
+    # 라인 시작 fence: 최대 3칸 들여쓰기 후 ```
+    _FENCE_START_RE = re.compile(r"^(?P<indent>[ \t]{0,3})```(?P<info>[^\n]*)[ \t]*$")
+
+    def __init__(
+        self,
+        text: str = "",
+        *,
+        inline_code_theme: str = "bold #FF7F50 on #E8E8E8",
+        code_theme: str = "friendly",
+        stream: bool = False,
+        refresh_per_second: int = 20,
+        update_every_chars: int = 100,
+        update_every_tokens: int = 30,
+        update_every_seconds: float = 0.03,
+        stabilize_code_block: bool = True,
+        end: str = "\n",
+        flush: bool = False,
+
+        html_output: bool = True,
+        pygments_style: str = "friendly",
+    ):
+        self.inline_code_theme = inline_code_theme
+        self.code_theme = code_theme
+        self.stream = stream
+        self.refresh_per_second = refresh_per_second
+
+        self.update_every_chars = update_every_chars
+        self.update_every_tokens = update_every_tokens
+        self.update_every_seconds = update_every_seconds
+
+        self.stabilize_code_block = stabilize_code_block
+        self.end = end
+        self.flush = flush
+
+        self.html_output = html_output
+        self.pygments_style = pygments_style
+
+        self.content = ""
+        self._buffer_chars = 0
+        self._buffer_tokens = 0
+        self._last_update_time = time.time()
+
+        # ---------- 콘솔(rich) 모드 ----------
+        custom_theme = Theme({"markdown.code": inline_code_theme})
+        self.console = Console(theme=custom_theme)
+        self.live: Optional[Live] = None
+
+        if self.stream and (not self.html_output):
+            self.live = Live(
+                "",
+                console=self.console,
+                refresh_per_second=self.refresh_per_second,
+                transient=False,
+            )
+            self.live.start()
+
+        # ---------- HTML(Jupyter) 모드 ----------
+        self._display_id = None
+
+        # markdown-it 인스턴스
+        self._md = MarkdownIt(
+            "commonmark",
+            {"html": False, "linkify": True, "typographer": True},
+        ).use(front_matter_plugin)
+
+        # 핵심: fence rule 커스터마이즈
+        self._patch_markdownit_fence_rule()
+
+        if text:
+            self.print(text, end=end, flush=flush)
+
+    # ------------------------------
+    # markdown-it fence rule 패치(핵심)
+    # ------------------------------
+    def _parse_info_lang(self, info: str) -> str:
+        info = (info or "").strip()
+        if not info:
+            return ""
+        first = info.split()[0].strip()
+        return first if self._LANG_RE.match(first) else ""
+
+    def _patch_markdownit_fence_rule(self):
+        """
+        markdown-it의 block rule 중 fence 규칙을 교체.
+        - ``` 다음 첫 토큰이 허용된 언어 토큰이면: 기존 fence 파싱
+        - 아니면 fence로 보지 않고 일반 텍스트로 처리(= 코드블록 시작 차단)
+        """
+        original_fence = self._md.block.ruler.__rules__[self._md.block.ruler.__find__("fence")].fn
+
+        def strict_fence(state: StateBlock, startLine: int, endLine: int, silent: bool) -> bool:
+            # 현재 라인 원문 추출
+            pos = state.bMarks[startLine] + state.tShift[startLine]
+            max_pos = state.eMarks[startLine]
+            line = state.src[pos:max_pos]
+
+            m = self._FENCE_START_RE.match(line)
+            if not m:
+                # fence 후보조차 아니면 기존 로직에 맡김
+                return original_fence(state, startLine, endLine, silent)
+
+            info = (m.group("info") or "")
+            lang = self._parse_info_lang(info)
+
+            # lang이 비었는데 info가 존재한다면(예: ```가, ```한글, ```!!!)
+            # => fence로 파싱하지 않게 강제 (텍스트로 남김)
+            if info.strip() and not lang:
+                return False
+
+            # lang이 없고 info도 없다(그냥 ``` )는 정상 fence로 허용할지 정책 필요
+            # 여기서는 "``` 단독 fence"는 허용(정상 코드블록)
+            return original_fence(state, startLine, endLine, silent)
+
+        # markdown-it-py 내부 구조상 ruler에서 rule 교체
+        idx = self._md.block.ruler.__find__("fence")
+        self._md.block.ruler.__rules__[idx].fn = strict_fence
+
+    # ------------------------------
+    # 공통 유틸
+    # ------------------------------
+    def _should_update(self, force: bool = False) -> bool:
+        if force:
+            return True
+        now = time.time()
+        if self.update_every_chars and self._buffer_chars >= self.update_every_chars:
+            return True
+        if self.update_every_tokens and self._buffer_tokens >= self.update_every_tokens:
+            return True
+        if self.update_every_seconds and (now - self._last_update_time) >= self.update_every_seconds:
+            return True
+        return False
+
+    def _reset_update_counter(self):
+        self._buffer_chars = 0
+        self._buffer_tokens = 0
+        self._last_update_time = time.time()
+
+    # ------------------------------
+    # HTML 렌더링
+    # ------------------------------
+    def _render_markdown_to_html(self, markdown_text: str) -> str:
+        html_body = self._md.render(markdown_text)
+        html_body = self._postprocess_codeblocks(html_body)
+        return self._wrap_with_template(html_body)
+
+    def _postprocess_codeblocks(self, html_body: str) -> str:
+        pattern = re.compile(
+            r"<pre><code(?: class=\"language-([^\"]+)\")?>\s*([\s\S]*?)\s*</code></pre>",
+            re.MULTILINE
+        )
+
+        def repl(m):
+            lang_raw = (m.group(1) or "").strip()
+            lang = lang_raw if self._LANG_RE.match(lang_raw) else ""
+
+            code_html_escaped = m.group(2)
+            code_text = html.unescape(code_html_escaped)
+
+            highlighted = self._pygments_highlight(code_text, lang)
+            code_for_attr = html.escape(code_text).replace("\n", "&#10;")
+
+            return f"""
+<div class="mdp-codeblock">
+  <div class="mdp-codeblock-toolbar">
+    <div class="mdp-codeblock-lang">{html.escape(lang) if lang else ""}</div>
+    <button class="mdp-copy-btn" data-code="{code_for_attr}">copy</button>
+  </div>
+  <div class="mdp-codeblock-body">{highlighted}</div>
+</div>
+"""
+
+        return pattern.sub(repl, html_body)
+
+    def _pygments_highlight(self, code: str, lang: str) -> str:
+        try:
+            if lang:
+                lexer = get_lexer_by_name(lang, stripall=False)
+            else:
+                lexer = guess_lexer(code)
+        except ClassNotFound:
+            lexer = get_lexer_by_name("text", stripall=False)
+
+        formatter = HtmlFormatter(style=self.pygments_style, noclasses=False)
+        return highlight(code, lexer, formatter)
+
+    def _wrap_with_template(self, body_html: str) -> str:
+        return f"""
+<div class="mdp-root">
+  {self._css_bundle()}
+  {self._js_bundle()}
+  <div class="mdp-markdown">
+    {body_html}
+  </div>
+</div>
+"""
+
+    def _css_bundle(self) -> str:
+        formatter = HtmlFormatter(style=self.pygments_style)
+        pyg_css = formatter.get_style_defs(".highlight")
+        return f"""
+<style>
+.mdp-root {{
+  font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"Apple Color Emoji","Segoe UI Emoji";
+  line-height: 1.55;
+}}
+.mdp-markdown pre {{ margin: 0; }}
+
+.mdp-codeblock {{
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 12px 0;
+}}
+.mdp-codeblock-toolbar {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.04);
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+}}
+.mdp-codeblock-lang {{
+  font-size: 12px;
+  color: rgba(0,0,0,0.55);
+}}
+.mdp-copy-btn {{
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,0,0,0.18);
+  background: white;
+  cursor: pointer;
+}}
+.mdp-copy-btn:active {{ transform: translateY(1px); }}
+.mdp-codeblock-body {{
+  padding: 10px 12px;
+  background: white;
+  overflow-x: auto;
+}}
+
+{pyg_css}
+</style>
+"""
+
+    def _js_bundle(self) -> str:
+        return """
+<script>
+(function() {
+  document.addEventListener("click", async function(e) {
+    const btn = e.target.closest(".mdp-copy-btn");
+    if (!btn) return;
+
+    const code = btn.getAttribute("data-code")
+      .replaceAll("&#10;", "\\n");
+
+    try {
+      await navigator.clipboard.writeText(code);
+      const old = btn.textContent;
+      btn.textContent = "copied";
+      setTimeout(() => btn.textContent = old, 900);
+    } catch (err) {
+      const old = btn.textContent;
+      btn.textContent = "failed";
+      setTimeout(() => btn.textContent = old, 900);
+    }
+  });
+})();
+</script>
+"""
+
+    def _update_html(self, force: bool = False):
+        if not self._should_update(force):
+            return
+
+        html_out = self._render_markdown_to_html(self.content)
+
+        if self._display_id is None:
+            handle = display(HTML(html_out), display_id=True)
+            self._display_id = handle.display_id
+        else:
+            update_display(HTML(html_out), display_id=self._display_id)
+
+        self._reset_update_counter()
+
+    # ------------------------------
+    # rich(Live) 렌더링
+    # ------------------------------
+    def _update_live(self, force: bool = False):
+        if not self.live:
+            return
+        if not self._should_update(force):
+            return
+
+        md = Markdown(self.content, code_theme=self.code_theme)
+        self.live.update(md, refresh=True)
+        self._reset_update_counter()
+
+    # ------------------------------
+    # public API
+    # ------------------------------
+    def print(self, text: str, *, end: Optional[str] = None, flush: Optional[bool] = None):
+        if end is None:
+            end = self.end
+        if flush is None:
+            flush = self.flush
+
+        text = str(text)
+
+        if self.stream:
+            self.content += text
+            self._buffer_chars += len(text)
+            self._buffer_tokens += 1
+
+            if self.html_output:
+                self._update_html(force=flush)
+            else:
+                self._update_live(force=flush)
+        else:
+            if self.html_output:
+                self.content = text + end
+                self._update_html(force=True)
+            else:
+                md = Markdown(text + end, code_theme=self.code_theme)
+                self.console.print(md, end="")
+
+    def write(self, text: str, **kwargs):
+        self.print(text, **kwargs)
+
+    def flush_now(self):
+        if self.stream:
+            if self.html_output:
+                self._update_html(force=True)
+            else:
+                self._update_live(force=True)
+
+    def close(self):
+        if self.stream:
+            if self.html_output:
+                self._update_html(force=True)
+            else:
+                if self.live:
+                    md = Markdown(self.content, code_theme=self.code_theme)
+                    self.live.update(md, refresh=True)
+                    self.live.stop()
+                    self.live = None
+
+    def __call__(self, text: str, **kwargs):
+        self.print(text, **kwargs)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+
+##############################################################################################################
 
 class StreamResponse:
     def __init__(self, response: Iterable, custom_metadata: Optional[Dict[str, Any]] = None):
@@ -449,9 +536,9 @@ class StreamResponse:
 
     def __str__(self) -> str:
         return self.content
-# --------------------------------------------------------------------------------------------------------------
 
 
+##############################################################################################################
 
 
 
@@ -903,7 +990,6 @@ class PgptEmbeddings(Embeddings):
 
     def __str__(self):
         return f"<DS_AgenticAI.PgptEmbeddings object model_name='{self.model_name}'>"
-
 
 
 
