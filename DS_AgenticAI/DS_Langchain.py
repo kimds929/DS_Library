@@ -1,4 +1,5 @@
 import os
+import sys
 import requests
 import base64
 import json
@@ -37,9 +38,6 @@ from pygments import highlight
 from pygments.lexers import get_lexer_by_name, guess_lexer
 from pygments.formatters import HtmlFormatter
 from pygments.util import ClassNotFound
-
-
-
 
 # --------------------------------------------------------------------------------------------------------------
 
@@ -481,62 +479,167 @@ class MarkdownPrint:
 ##############################################################################################################
 
 class StreamResponse:
-    def __init__(self, response: Iterable, custom_metadata: Optional[Dict[str, Any]] = None):
-        """
-        스트리밍 응답을 처리하고 메타데이터(토큰 사용량 포함)를 관리하는 클래스입니다.
-        """
-        self.response = response
-        self.content = ""  # answer에서 content로 변경됨
-        self.metadata = custom_metadata if custom_metadata is not None else {}
-        self.chunk_metadata = {}
-        self.token_usage = {} # 토큰 사용량을 저장할 딕셔너리 추가
+    """
+    content: 스트리밍 중 사용자에게 보여준 문자열 누적
+    object : 최종 파싱된 객체(final_parser.parse(content)) 또는 스트림이 직접 내보낸 구조화 객체
+
+    - 텍스트 스트림(AIMessageChunk/str)만 오면: 종료 후 final_parser로 object 생성 (PydanticOutputParser 포함)
+    - dict/list 스트림이 오면: object를 즉시 갱신하고 content는 JSON 문자열 스냅샷으로 유지
+    """
+
+    def __init__(
+        self,
+        stream: Iterable,
+        custom_metadata: Optional[Dict[str, Any]] = None,
+        *,
+        final_parser: Optional[Any] = None,  # parse(str) 기대 (PydanticOutputParser 포함)
+        structured_render: str = "oneline_json",  # "oneline_json" | "pretty_json" | "str"
+        structured_overwrite: bool = True,
+        structured_max_width: int = 180,
+        structured_flush: bool = True,
+        markdown_stream: bool = True,
+        markdown_end: str = "",
+        markdown_flush: bool = False,
+        structured_use_markdownprint: bool = False,
+    ):
+        self.stream = stream
+        self.content: str = ""
+        self.object: Any = None
+
+        self.metadata = custom_metadata or {}
+        self.chunk_metadata: Dict[str, Any] = {}
+        self.token_usage: Dict[str, Any] = {}
+
+        self.final_parser = final_parser
+
+        self.structured_render = structured_render
+        self.structured_overwrite = structured_overwrite
+        self.structured_max_width = structured_max_width
+        self.structured_flush = structured_flush
+
+        self.markdown_stream = markdown_stream
+        self.markdown_end = markdown_end
+        self.markdown_flush = markdown_flush
+        self.structured_use_markdownprint = structured_use_markdownprint
+
+        self._last_line_len = 0
+        self._saw_structured_object = False
+
         self.stream_and_process()
 
+        # 텍스트만 스트리밍된 경우: 종료 후 파서로 최종 객체 생성 (PydanticOutputParser 포함)
+        if (not self._saw_structured_object) and self.final_parser is not None:
+            self.object = self._final_parse(self.content, self.final_parser)
+
+    # -------- parsing helpers --------
+    def _final_parse(self, text: str, parser: Any) -> Any:
+        """
+        parser.parse(text)를 표준으로 사용.
+        (PydanticOutputParser는 parse()가 pydantic model을 반환)
+        """
+        if parser is None:
+            return None
+        parse = getattr(parser, "parse", None)
+        if not callable(parse):
+            raise TypeError("final_parser는 parse(text: str) 메서드를 제공해야 합니다.")
+        return parse(text)
+
+    # -------- structured rendering --------
+    def _render_structured(self, obj: Union[dict, list]) -> str:
+        if self.structured_render == "pretty_json":
+            return json.dumps(obj, ensure_ascii=False, indent=2)
+        if self.structured_render == "str":
+            return str(obj)
+        return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+    def _trim_one_line(self, s: str) -> str:
+        s = s.replace("\n", "\\n")
+        if self.structured_max_width and len(s) > self.structured_max_width:
+            s = s[: self.structured_max_width - 1] + "…"
+        return s
+
+    def _overwrite_line(self, line: str):
+        line = self._trim_one_line(line)
+        pad = max(0, self._last_line_len - len(line))
+        sys.stdout.write("\r" + line + (" " * pad))
+        if self.structured_flush:
+            sys.stdout.flush()
+        self._last_line_len = len(line)
+
+    def _println(self, line: str = ""):
+        sys.stdout.write(line + "\n")
+        if self.structured_flush:
+            sys.stdout.flush()
+        self._last_line_len = 0
+
+    # -------- main --------
     def stream_and_process(self, return_output: bool = False) -> Union[None, Dict[str, Any]]:
         start_time = time.time()
-        with MarkdownPrint(stream=True, end="", flush=False) as print_md:
-            for token in self.response:
-                if isinstance(token, AIMessageChunk):
-                    self.content += token.content
-                    # print(token.content, end="", flush=True)
-                    print_md(token.content)
-                    
-                    # 1. 일반 메타데이터 추출 (finish_reason, model_name 등)
-                    if hasattr(token, 'response_metadata') and token.response_metadata:
-                        self.chunk_metadata.update(token.response_metadata)
-                    
-                    # 2. 토큰 사용량 추출 (LangChain 최신 표준: usage_metadata)
-                    if hasattr(token, 'usage_metadata') and token.usage_metadata:
-                        self.token_usage = token.usage_metadata
-                    # (호환성) 일부 구버전이나 특정 모델은 response_metadata 안에 토큰 정보를 넣기도 함
-                    elif hasattr(token, 'response_metadata') and 'token_usage' in token.response_metadata:
-                        self.token_usage = token.response_metadata['token_usage']
-                        
-                elif isinstance(token, str):
-                    self.content += token
-                    # print(token, end="", flush=True)
-                    print_md(token)
-                
-        # 응답 완료 후 처리 시간 및 길이 계산
-        self.metadata['latency_seconds'] = round(time.time() - start_time, 4)
-        self.metadata['total_length'] = len(self.content)
-        
-        # 최종 메타데이터 병합 (토큰 사용량 명시적 추가)
-        final_metadata = {
-            **self.metadata, 
-            **self.chunk_metadata,
-            "token_usage": self.token_usage
-        }
-        
+
+        def _separate_overwrite_line_if_needed():
+            if self.structured_overwrite and self._last_line_len:
+                self._println("")
+
+        with MarkdownPrint(stream=self.markdown_stream, end=self.markdown_end, flush=self.markdown_flush) as print_md:
+            for chunk in self.stream:
+
+                # 1) LLM 토큰 스트림
+                if isinstance(chunk, AIMessageChunk):
+                    _separate_overwrite_line_if_needed()
+                    self.content += chunk.content
+                    print_md(chunk.content)
+
+                    if getattr(chunk, "response_metadata", None):
+                        self.chunk_metadata.update(chunk.response_metadata)
+
+                    if getattr(chunk, "usage_metadata", None):
+                        self.token_usage = chunk.usage_metadata
+                    elif getattr(chunk, "response_metadata", None) and "token_usage" in chunk.response_metadata:
+                        self.token_usage = chunk.response_metadata["token_usage"]
+
+                # 2) 문자열 스트림
+                elif isinstance(chunk, str):
+                    _separate_overwrite_line_if_needed()
+                    self.content += chunk
+                    print_md(chunk)
+
+                # 3) 구조화 객체 스트림
+                elif isinstance(chunk, (dict, list)):
+                    self._saw_structured_object = True
+                    self.object = chunk  # 최신 스냅샷 유지
+
+                    s = self._render_structured(chunk)
+                    self.content = s  # 스냅샷 문자열로 유지
+
+                    if self.structured_use_markdownprint:
+                        _separate_overwrite_line_if_needed()
+                        print_md(s if self.structured_render != "pretty_json" else (s + "\n"))
+                    else:
+                        if self.structured_overwrite:
+                            self._overwrite_line(s)
+                        else:
+                            self._println(s if self.structured_render == "pretty_json" else self._trim_one_line(s))
+
+                # 4) 기타 타입
+                else:
+                    _separate_overwrite_line_if_needed()
+                    text = str(chunk)
+                    self.content += text
+                    print_md(text)
+
+        if self.structured_overwrite and self._last_line_len:
+            self._println("")
+
+        self.metadata["latency_seconds"] = round(time.time() - start_time, 4)
+        self.metadata["total_length"] = len(self.content)
+
+        final_metadata = {**self.metadata, **self.chunk_metadata, "token_usage": self.token_usage}
+
         if return_output:
-            return {
-                "content": self.content, # 반환 키도 content로 변경
-                "metadata": final_metadata
-            }
+            return {"content": self.content, "object": self.object, "metadata": final_metadata}
 
     def __str__(self) -> str:
         return self.content
-
 
 ##############################################################################################################
 
